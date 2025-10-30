@@ -1,0 +1,121 @@
+{
+  "v": "1.0",
+  "ts": 1761843414,
+  "s": {
+    "d": "raphaelreck.com",
+    "t": "prof_tech_blog",
+    "a": {
+      "n": "Raphaël Reck",
+      "r": "IT_sys_sw_consultant",
+      "exp": [
+        "drupal",
+        "laravel",
+        "sys_arch",
+        "debug",
+        "web_int"
+      ]
+    },
+    "nav": [
+      {
+        "l": "Home",
+        "u": "/"
+      },
+      {
+        "l": "Blog",
+        "u": "/blog/"
+      },
+      {
+        "l": "GitHub",
+        "u": "https://github.com/djassoRaph",
+        "ext": 1
+      },
+      {
+        "l": "LinkedIn",
+        "u": "https://linkedin.com/in/raphael-reck-link/",
+        "ext": 1
+      }
+    ]
+  },
+  "p": [
+    {
+      "id": "2025-10-08-juggling-fireballs",
+      "u": "/blog/2025-10-08-juggling-fireballs.html",
+      "d": "2025-10-08",
+      "tg": [
+        "prod",
+        "life",
+        "debug"
+      ],
+      "rt": 4,
+      "tc": 1,
+      "cb": 2,
+      "emb": [
+        0.26,
+        0.77,
+        -0.21,
+        -0.67,
+        0.92,
+        -0.64,
+        0.03,
+        0.45
+      ],
+      "sum": "A reflection on managing a heavy workload alone while my 'working buddy' is out, and the lessons lea"
+    },
+    {
+      "id": "when-webservices-lie",
+      "u": "/blog/when-webservices-lie.html",
+      "d": "2025-08-30",
+      "tg": [
+        "drupal",
+        "ws",
+        "debug"
+      ],
+      "rt": 9,
+      "tc": 1,
+      "cb": 4,
+      "emb": [
+        0.19,
+        0.57,
+        0.03,
+        0.13,
+        -0.02,
+        0.76,
+        0.94,
+        -0.1
+      ],
+      "sum": "A real debugging story: PowerPoint documentation, Drupal hooks that fire too early, and web services"
+    }
+  ],
+  "serv": [
+    {
+      "t": "consulting",
+      "d": "Tech audits, team mentoring, roadmap planning"
+    },
+    {
+      "t": "dev",
+      "d": "Full-stack web apps, APIs, integrations"
+    },
+    {
+      "t": "web_int",
+      "d": "Responsive UI, third-party integration, performance"
+    },
+    {
+      "t": "it_support",
+      "d": "Infrastructure monitoring, user support, deployments"
+    },
+    {
+      "t": "network",
+      "d": "Wireless, A/V, GPS, surveillance systems"
+    },
+    {
+      "t": "sys_arch",
+      "d": "Cloud, on-prem, DevOps, security"
+    }
+  ],
+  "stats": {
+    "total_posts": 2,
+    "technical_posts": 2,
+    "total_code_blocks": 6,
+    "avg_read_time": 6.5
+  }
+}
