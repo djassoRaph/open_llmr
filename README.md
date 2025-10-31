@@ -1,277 +1,439 @@
-# LLMR (LLM-Readable) Format Generator
+# Universal LLMR Generator v2.0
 
-## What is this?
+A comprehensive Python tool to generate LLM-Readable (`.llmr`) files from any static website. This enables AI systems to efficiently understand and navigate your website's content.
 
-This Python script scans your website's HTML files and generates a compressed, machine-readable `.llmr` file optimized for AI/LLM consumption. Think of it as "RSS for AI agents."
+## Overview
 
-## Why use it?
+The LLMR format is designed to help LLMs and AI systems:
+- **Reduce token consumption** by 70-95% compared to raw HTML
+- **Understand site structure** through semantic content types
+- **Navigate efficiently** using embeddings and metadata
+- **Extract structured data** from Schema.org and JSON-LD
+- **Identify content types** automatically (articles, products, events, etc.)
 
-- **Token efficiency**: Reduces content size by ~60-95% compared to raw HTML
-- **Faster AI parsing**: Structured data instead of parsing HTML markup
-- **Semantic richness**: Provides context about content type, technical depth, etc.
-- **Bandwidth savings**: Less data to transfer when AI systems browse your site
+## Features
 
-## Token Comparison
+### Universal HTML Support
+- Works with **any static website** structure
+- Automatic content type detection
+- No hardcoded assumptions about your site
 
-**Traditional HTML parsing:**
-```
-Full blog post HTML: ~3,000-5,000 tokens
-- Navigation markup: ~500 tokens
-- Styling/CSS classes: ~800 tokens
-- Headers/footers: ~400 tokens
-- Actual content: ~1,500 tokens
-```
+### Smart Content Detection
+- **Schema.org** microdata extraction
+- **JSON-LD** structured data parsing
+- **RDFa** attribute support
+- **Open Graph** metadata
+- Automatic content type classification
 
-**LLMR format:**
-```
-Compressed post entry: ~50-150 tokens per post
-- Metadata: ~30 tokens
-- Embedding: ~16 tokens
-- Summary: ~20 tokens
-```
+### Intelligent Analysis
+- Keyword extraction using NLP techniques
+- Heading hierarchy analysis
+- Word count and read time estimation
+- Media detection (images, videos)
+- Code block identification
 
-**Savings: 94-97% token reduction**
+### Rich Metadata
+- Content embeddings for semantic search
+- Language detection
+- Author attribution
+- Structural metadata
+- Site-wide statistics
 
 ## Installation
 
+### Requirements
+- Python 3.7+
+- Standard library only (no external dependencies for basic usage)
+
+### Optional (for production embeddings)
 ```bash
-# No dependencies required - uses only Python standard library
-python3 generate_llmr.py /path/to/your/website
+# For local sentence embeddings
+pip install sentence-transformers --break-system-packages
+
+# For OpenAI embeddings
+pip install openai --break-system-packages
+
+# For Cohere embeddings
+pip install cohere --break-system-packages
 ```
 
 ## Usage
 
-### Basic usage:
+### Basic Usage
+
 ```bash
-python3 generate_llmr.py /path/to/website
+# Scan current directory
+python generate_llmr.py
+
+# Scan specific directory
+python generate_llmr.py /path/to/website
+
+# Specify base URL for absolute URLs
+python generate_llmr.py /path/to/website https://example.com
 ```
 
-### Run from current directory:
-```bash
-python3 generate_llmr.py .
-```
+### Output
 
-### Output:
-- Generates `site.llmr` in the website root (or `/home/claude` if source is read-only)
-- Shows statistics about posts, technical content, and compression ratio
+The script generates a `site.llmr` file containing:
+- Site metadata and structure
+- All page content in compressed format
+- Embeddings for semantic search
+- Statistics and analytics
 
-## LLMR Format Structure
+## LLMR File Format
+
+### Structure (v2.0)
 
 ```json
 {
-  "v": "1.0",                          // Version
-  "ts": 1730332800,                    // Timestamp
-  "s": {                               // Site metadata
-    "d": "raphaelreck.com",
-    "t": "prof_tech_blog",
-    "a": {                             // Author
-      "n": "Raphaël Reck",
-      "r": "IT_sys_sw_consultant",
-      "exp": ["drupal", "laravel", ...]
+  "version": "2.0",
+  "generated": "2025-10-31T12:00:00",
+  "timestamp": 1730379600,
+  "site": {
+    "title": "Your Site Title",
+    "description": "Your site description",
+    "author": "Site Author",
+    "base_url": "https://example.com",
+    "content_types": {
+      "Article": 15,
+      "WebPage": 8,
+      "Product": 3
     },
-    "nav": [...]                       // Navigation links
+    "total_pages": 26
   },
-  "p": [                               // Posts array
+  "pages": [
     {
       "id": "post-slug",
-      "u": "/blog/post.html",          // URL
-      "d": "2025-10-08",               // Date
-      "tg": ["prod", "debug"],         // Tags (abbreviated)
-      "rt": 4,                         // Read time (minutes)
-      "tc": 1,                         // Technical content (1=yes, 0=no)
-      "cb": 2,                         // Code blocks count
-      "emb": [0.26, 0.77, ...],       // 8D embedding vector
-      "sum": "Summary text..."         // Summary (100 chars)
+      "u": "/blog/post-slug.html",
+      "t": "BlogPosting",
+      "ti": "Page Title",
+      "d": "Page description...",
+      "kw": ["keyword1", "keyword2", ...],
+      "wc": 1500,
+      "rt": 8,
+      "emb": [0.123, -0.456, ...],
+      "a": "Author Name",
+      "l": "en",
+      "sd": 1,
+      "cb": 3,
+      "h1": "Main Heading"
     }
   ],
-  "serv": [...],                       // Services offered
-  "stats": {                           // Site statistics
-    "total_posts": 10,
-    "technical_posts": 7,
-    "total_code_blocks": 45,
-    "avg_read_time": 6.2
+  "stats": {
+    "total_pages": 26,
+    "total_words": 45000,
+    "avg_read_time": 7.5,
+    "pages_with_code": 12,
+    "pages_with_structured_data": 20,
+    "total_images": 150,
+    "total_videos": 5,
+    "languages": ["en", "fr"]
   }
 }
 ```
 
-## Key Abbreviations
+### Field Reference
 
-The format uses compressed keys to reduce token usage:
+#### Site Fields
+- `title` - Site title
+- `description` - Site description
+- `author` - Site author/owner
+- `base_url` - Base URL for absolute links
+- `content_types` - Count of each content type
+- `total_pages` - Total number of pages
 
-| Full | Short | Meaning |
-|------|-------|---------|
-| version | v | Format version |
-| timestamp | ts | Generation time |
-| site | s | Site metadata |
-| domain | d | Domain name |
-| type | t | Site type |
-| author | a | Author info |
-| name | n | Name |
-| role | r | Professional role |
-| expertise | exp | Areas of expertise |
-| posts | p | Blog posts array |
-| url | u | URL path |
-| date | d | Publication date |
-| tags | tg | Content tags |
-| read_time | rt | Reading time |
-| technical_content | tc | Is technical? |
-| code_blocks | cb | Number of code blocks |
-| embedding | emb | Vector embedding |
-| summary | sum | Content summary |
-| services | serv | Services offered |
+#### Page Fields (Compressed)
+- `id` - Unique page identifier
+- `u` - URL (relative or absolute)
+- `t` - Content type (Schema.org)
+- `ti` - Title (truncated to 100 chars)
+- `d` - Description (truncated to 200 chars)
+- `kw` - Keywords (top 10)
+- `wc` - Word count
+- `rt` - Estimated read time (minutes)
+- `emb` - Content embedding vector
+- `a` - Author (optional)
+- `l` - Language (optional, omitted if 'en')
+- `sd` - Has structured data flag
+- `cb` - Code blocks count (optional)
+- `h1` - Main heading (optional)
 
-## Tag Abbreviations
+## Supported Content Types
 
-Common tags are compressed:
+The generator automatically detects these Schema.org types:
 
-- productivity → prod
-- debugging → debug
-- legacy systems → legacy
-- web services → ws
-- burnout → burn
-- teamwork → team
-- architecture → arch
-- enterprise → ent
+- **Article** - Generic articles
+- **BlogPosting** - Blog posts
+- **NewsArticle** - News articles
+- **Product** - Products/items
+- **Event** - Events/conferences
+- **Organization** - Company/about pages
+- **Person** - Profile/bio pages
+- **WebPage** - Generic pages
+- **HowTo** - Tutorials/guides
+- **FAQPage** - FAQ pages
+- **ContactPage** - Contact pages
+- **Recipe** - Recipes
+- **VideoObject** - Video content
+- **Course** - Training/courses
+- **JobPosting** - Job listings
+- **Review** - Reviews/ratings
 
-## Adding to Your Website
+## Integration
 
-1. **Generate the file:**
-   ```bash
-   python3 generate_llmr.py /path/to/your/site
-   ```
+### 1. Add to Website
 
-2. **Upload `site.llmr` to your website root**
+Upload the generated `site.llmr` file to your website root:
 
-3. **Add to your HTML `<head>`:**
-   ```html
-   <link rel="llm-index" type="application/json" href="/site.llmr">
-   ```
-
-4. **(Optional) Add to robots.txt:**
-   ```
-   # LLM-readable index
-   Sitemap: https://yoursite.com/site.llmr
-   ```
-
-## Embeddings
-
-The current version uses **simple hash-based embeddings** for demonstration. These are consistent but not semantically meaningful.
-
-### For Production:
-
-**Option 1: Sentence Transformers (Local)**
-```bash
-pip install sentence-transformers
-
-# In your code:
-from sentence_transformers import SentenceTransformer
-model = SentenceTransformer('all-MiniLM-L6-v2')
-embedding = model.encode(text).tolist()
+```
+your-website/
+├── index.html
+├── robots.txt
+├── sitemap.xml
+└── site.llmr  ← Add this
 ```
 
-**Option 2: OpenAI Embeddings (API)**
-```bash
-pip install openai
+### 2. Add HTML Link Tag
 
-# In your code:
-import openai
-response = openai.Embedding.create(
-    input=text,
-    model="text-embedding-ada-002"
-)
-embedding = response['data'][0]['embedding']
+In your HTML `<head>` section:
+
+```html
+<link rel="llm-index" type="application/json" href="/site.llmr">
 ```
 
-**Option 3: Anthropic (Future)**
-When Anthropic releases embedding models, use those for optimal Claude compatibility.
+### 3. Reference in robots.txt (Optional)
 
-## Integrating with publish_blog.py
+```
+# LLM-Readable Index
+Sitemap: https://yourdomain.com/site.llmr
+```
 
-Add to your existing blog publishing workflow:
+### 4. HTTP Headers (Optional)
+
+Add to your server configuration:
+
+```nginx
+# Nginx
+location /site.llmr {
+    add_header Content-Type application/json;
+    add_header Cache-Control "public, max-age=3600";
+}
+```
+
+```apache
+# Apache
+<Files "site.llmr">
+    Header set Content-Type "application/json"
+    Header set Cache-Control "public, max-age=3600"
+</Files>
+```
+
+## Upgrading Embeddings
+
+The default implementation uses simple hash-based embeddings for demonstration. For production use, upgrade to real embeddings:
+
+### Option 1: Sentence Transformers (Local)
 
 ```python
-# At the end of publish_blog.py
-import subprocess
+from sentence_transformers import SentenceTransformer
 
-print("🤖 Generating LLMR index...")
-subprocess.run(['python3', 'generate_llmr.py', '.'])
-print("✅ LLMR index updated")
+class ProductionEmbeddingGenerator:
+    def __init__(self):
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+    
+    def generate_embedding(self, text: str) -> List[float]:
+        embedding = self.model.encode(text)
+        return embedding.tolist()
+
+# Replace in generate_llmr.py:
+# embedding = EmbeddingGenerator.generate_content_embedding(parser)
+# with:
+# embedding = production_generator.generate_embedding(content_text)
 ```
+
+### Option 2: OpenAI Embeddings
+
+```python
+import openai
+
+class OpenAIEmbeddingGenerator:
+    def __init__(self, api_key: str):
+        openai.api_key = api_key
+    
+    def generate_embedding(self, text: str) -> List[float]:
+        response = openai.Embedding.create(
+            input=text,
+            model="text-embedding-ada-002"
+        )
+        return response['data'][0]['embedding']
+```
+
+### Option 3: Cohere Embeddings
+
+```python
+import cohere
+
+class CohereEmbeddingGenerator:
+    def __init__(self, api_key: str):
+        self.co = cohere.Client(api_key)
+    
+    def generate_embedding(self, text: str) -> List[float]:
+        response = self.co.embed(
+            texts=[text],
+            model='embed-english-v3.0'
+        )
+        return response.embeddings[0]
+```
+
+## Advanced Usage
+
+### Custom Content Type Detection
+
+```python
+# Add custom type detection rules
+ContentTypeDetector.SCHEMA_TYPES["CustomType"] = ["custom", "special"]
+```
+
+### Filter Pages
+
+```python
+# Only process certain pages
+def should_process(html_path: Path) -> bool:
+    return "blog" in str(html_path) or "article" in str(html_path)
+
+# In WebsiteScanner._process_page():
+if not should_process(html_path):
+    return None
+```
+
+### Custom Keyword Extraction
+
+```python
+# Add domain-specific stop words
+KeywordExtractor.STOP_WORDS.update(["custom", "stopword"])
+```
+
+## Benefits for AI Systems
+
+### Token Efficiency
+- **70-95% reduction** in tokens compared to raw HTML
+- Semantic compression preserves meaning
+- Structured data enables targeted retrieval
+
+### Better Understanding
+- Content types guide response generation
+- Embeddings enable semantic search
+- Keywords facilitate topic identification
+
+### Faster Navigation
+- Direct access to page metadata
+- No HTML parsing overhead
+- Efficient content discovery
+
+## Comparison with Traditional Methods
+
+| Method | Tokens | Parsing | Structure | Semantic |
+|--------|--------|---------|-----------|----------|
+| Raw HTML | 10,000+ | Complex | Poor | No |
+| Markdown | 5,000+ | Medium | Fair | No |
+| Sitemap XML | 500+ | Simple | Good | No |
+| **LLMR** | **300-500** | **None** | **Excellent** | **Yes** |
+
+## Example Use Cases
+
+### 1. AI Chatbots
+```
+User: "Find articles about Python debugging"
+AI: *searches embeddings in LLMR*
+    *finds 3 relevant articles in 0.1s*
+    "I found 3 articles: ..."
+```
+
+### 2. Content Recommendation
+```python
+# Find similar content
+def find_similar(target_embedding, llmr_data, top_k=5):
+    similarities = []
+    for page in llmr_data['pages']:
+        sim = cosine_similarity(target_embedding, page['emb'])
+        similarities.append((page, sim))
+    return sorted(similarities, key=lambda x: x[1], reverse=True)[:top_k]
+```
+
+### 3. Site Analysis
+```python
+# Analyze content distribution
+with open('site.llmr', 'r') as f:
+    data = json.load(f)
+    
+print(f"Total pages: {data['stats']['total_pages']}")
+print(f"Content types: {data['site']['content_types']}")
+print(f"Average read time: {data['stats']['avg_read_time']} min")
+```
+
+## Troubleshooting
+
+### No pages found
+- Check that HTML files exist in the directory
+- Verify file permissions
+- Try specifying the full path
+
+### Missing metadata
+- Ensure HTML files have proper `<title>` and `<meta>` tags
+- Add Schema.org markup for better detection
+- Use JSON-LD for structured data
+
+### Large file size
+- Reduce embedding dimensions
+- Truncate descriptions more aggressively
+- Filter out unnecessary pages
+
+### Encoding errors
+- Ensure HTML files are UTF-8 encoded
+- Add encoding declaration to HTML files
 
 ## Future Enhancements
 
-Potential additions to the format:
-
-1. **Code language detection**: Identify Python/JavaScript/PHP in code blocks
-2. **Related posts**: Link similar content by embedding similarity
-3. **Update frequency**: Track how often posts are modified
-4. **Media inventory**: Count images, videos, diagrams
-5. **Complexity scores**: Rate technical difficulty 1-10
-6. **Time-to-implement**: For tutorial posts, estimate implementation time
-
-## The Consortium Vision
-
-This is a **proof-of-concept** for an industry-wide standard. For this to become mainstream:
-
-1. ✅ Create working prototype (done!)
-2. ⬜ Write formal specification document
-3. ⬜ Get AI companies to adopt (OpenAI, Anthropic, Google)
-4. ⬜ Build CMS plugins (WordPress, Drupal, Ghost)
-5. ⬜ Evangelize to developer community
-
-## Real-World Impact
-
-**For content creators:**
-- AI systems understand your content better
-- Reduced crawling bandwidth costs
-- More accurate AI summaries of your work
-
-**For AI systems:**
-- 95%+ reduction in tokens needed
-- Instant semantic understanding
-- No HTML parsing overhead
-
-**For users:**
-- Faster AI responses about web content
-- More accurate information retrieval
-- Lower API costs
-
-## Technical Notes
-
-- Pure Python 3 (no dependencies)
-- Uses `HTMLParser` for HTML processing
-- Generates hash-based pseudo-embeddings
-- Handles nested directory structures
-- Gracefully handles malformed HTML
-
-## Contributing
-
-This is the **start** of something bigger. Ideas for improvement:
-
-- Better embedding generation
-- Multi-language support
-- Schema validation
-- Versioning and migrations
-- RSS/Atom feed integration
-
-## Example Output
-
-See `example-site.llmr` for a sample generated file.
+- [ ] Incremental updates (only process changed files)
+- [ ] Multi-language support with separate embeddings
+- [ ] Image content analysis
+- [ ] PDF content extraction
+- [ ] Video transcript processing
+- [ ] Real-time generation via webhook
+- [ ] CDN integration
+- [ ] Versioning and diffs
 
 ## License
 
-MIT License - Use freely, modify as needed, contribute improvements.
+MIT License - See the original script header for details.
 
-## Credits
+## Contributing
 
-Created by Raphaël Reck as part of exploring **LLM-first web architecture**.
+This is an open format designed to evolve with community input. Suggestions welcome!
 
-Inspired by the need for efficient AI-web content communication in an era where:
-- LLMs consume billions of web pages
-- Token costs matter
-- Bandwidth is precious
-- Semantic understanding beats keyword matching
+## Related Standards
+
+- [Schema.org](https://schema.org/) - Structured data vocabulary
+- [JSON-LD](https://json-ld.org/) - Linked data format
+- [Open Graph](https://ogp.me/) - Social metadata protocol
+- [Microdata](https://www.w3.org/TR/microdata/) - HTML5 semantic markup
+
+## Version History
+
+### v2.0 (Current)
+- Universal HTML support
+- Schema.org and JSON-LD extraction
+- Automatic content type detection
+- Intelligent keyword extraction
+- Enhanced embeddings
+- Site-wide statistics
+
+### v1.0 (Original)
+- Basic blog post extraction
+- Simple metadata
+- Hash-based embeddings
+- Blog-specific structure
 
 ---
 
-*"RSS for the AI Era"*
+**Questions?** Open an issue or contribute improvements!

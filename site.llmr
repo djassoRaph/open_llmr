@@ -1,0 +1,24 @@
+{
+  "version": "2.0",
+  "generated": "2025-10-31T07:56:44.330693",
+  "timestamp": 1761893804,
+  "site": {
+    "title": "",
+    "description": "",
+    "author": "",
+    "base_url": "raphaelreck.com",
+    "content_types": {},
+    "total_pages": 0
+  },
+  "pages": [],
+  "stats": {
+    "total_pages": 0,
+    "total_words": 0,
+    "avg_read_time": 0,
+    "pages_with_code": 0,
+    "pages_with_structured_data": 0,
+    "total_images": 0,
+    "total_videos": 0,
+    "languages": []
+  }
+}
