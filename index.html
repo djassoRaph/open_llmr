@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Primary -->
+    <title>LLMR — RSS for the AI Era</title>
+    <meta name="description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.">
+    <meta name="author" content="Raphaël Reck">
+    <meta name="keywords" content="llmr, llms.txt, AI indexing, LLM tokens, site index, RSS for AI, open source, token reduction, machine readable web">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://open-llmr.org/">
+    <meta name="google-site-verification" content="CIKhMzYdtjAIRwDcUs2WtKZBkQTb6MCRo5nYR4fc11g" />
+
+    <!-- Open Graph — LinkedIn, Facebook, WhatsApp, Discord, Slack -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://open-llmr.org/">
+    <meta property="og:site_name" content="LLMR">
+    <meta property="og:title" content="LLMR — RSS for the AI Era">
+    <meta property="og:description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.">
+    <meta property="og:image" content="https://open-llmr.org/og-image.png">
+    <meta property="og:image:secure_url" content="https://open-llmr.org/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="LLMR: 633,997 bytes of HTML shrinks to 10,974 bytes. 98.3% reduction. One fetch. Full site understanding.">
+    <meta property="og:locale" content="en_US">
+
+    <!-- Twitter / X — summary_large_image = big card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://open-llmr.org/">
+    <meta name="twitter:title" content="LLMR — RSS for the AI Era">
+    <meta name="twitter:description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.">
+    <meta name="twitter:image" content="https://open-llmr.org/og-image.png">
+    <meta name="twitter:image:alt" content="LLMR: 633,997 bytes of HTML shrinks to 10,974 bytes. 98.3% fewer tokens. One fetch.">
+    <!-- Add your handles: -->
+    <!-- <meta name="twitter:site" content="@open_llmr"> -->
+    <!-- <meta name="twitter:creator" content="@YourHandle"> -->
+
+    <link rel="llmr" type="application/json" href="/llmr.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+    <div class="badge">Open Source &bull; MIT License &bull; v2.0</div>
+
+    <h1>One file.<br><span class="accent">Fewer tokens.</span></h1>
+
+    <p class="subtitle">
+        LLMR is a JSON site index that gives AI systems your entire website in one fetch.
+        No HTML parsing. No wasted tokens.
+    </p>
+
+    <div class="counter-wrap">
+        <div class="counter counter-old">
+            <div class="counter-num" id="tokens-old">633,997</div>
+            <div class="counter-label">bytes of HTML</div>
+        </div>
+        <div class="counter-arrow">&rarr;</div>
+        <div class="counter counter-new">
+            <div class="counter-num" id="tokens-new">10,974</div>
+            <div class="counter-label">bytes of LLMR</div>
+        </div>
+        <div class="counter">
+            <div class="counter-pct">98.3%</div>
+            <div class="counter-pct-label">reduction &bull; measured</div>
+        </div>
+    </div>
+
+    <div class="cta-row">
+        <a href="https://gitlab.com/open-llmr" class="btn btn-primary">GitLab &rarr;</a>
+        <a href="#install" class="btn btn-ghost">Install</a>
+        <a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md" class="btn btn-ghost">Read Spec</a>
+    </div>
+</div>
+
+<!-- WHAT IT LOOKS LIKE -->
+<section>
+    <h2><span class="num">01</span> What it looks like</h2>
+    <p class="section-sub">Your whole site in a JSON file. Compressed keys. Every token earns its place.</p>
+
+    <div class="code-block">
+        <div class="code-header">
+            <span>llmr.json</span>
+            <span>~1,600 tokens for 21 blog posts</span>
+        </div>
+        <div class="code-body">{
+  <span class="key">"v"</span>: <span class="str">"2.0"</span>,
+  <span class="key">"s"</span>: {
+    <span class="key">"d"</span>: <span class="str">"raphaelreck.com"</span>,
+    <span class="key">"a"</span>: { <span class="key">"n"</span>: <span class="str">"Raphaël Reck"</span>, <span class="key">"r"</span>: <span class="str">"IT_sys_sw_consultant"</span> }
+  },
+  <span class="key">"p"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"when-webservices-lie"</span>,
+      <span class="key">"u"</span>: <span class="str">"/blog/when-webservices-lie.html"</span>,
+      <span class="key">"d"</span>: <span class="str">"2025-08-30"</span>,
+      <span class="key">"tg"</span>: [<span class="str">"drupal"</span>, <span class="str">"debug"</span>],
+      <span class="key">"rt"</span>: <span class="num">9</span>,
+      <span class="key">"cb"</span>: <span class="num">24</span>,
+      <span class="key">"sum"</span>: <span class="str">"Drupal hooks firing too early, web services returning wrong data."</span>
+    }
+  ]
+}</div>
+    </div>
+</section>
+
+<!-- BENCHMARK -->
+<section>
+    <h2><span class="num">02</span> Real numbers, not estimates</h2>
+    <p class="section-sub">Measured on raphaelreck.com — 21 blog posts, 93 code blocks.</p>
+
+    <div class="benchmark">
+        <div class="benchmark-title">raphaelreck.com &bull; measured april 2026</div>
+        <div class="benchmark-row">
+            <span class="benchmark-label">Original HTML (all pages)</span>
+            <span class="benchmark-val">633,997 bytes</span>
+        </div>
+        <div class="benchmark-row">
+            <span class="benchmark-label">LLMR file</span>
+            <span class="benchmark-val green">10,974 bytes</span>
+        </div>
+        <div class="benchmark-row">
+            <span class="benchmark-label">Reduction</span>
+            <span class="benchmark-val green">98.3%</span>
+        </div>
+        <div class="benchmark-row">
+            <span class="benchmark-label">HTTP requests</span>
+            <span class="benchmark-val green">21 → 1</span>
+        </div>
+        <div class="benchmark-row">
+            <span class="benchmark-label">Estimated tokens</span>
+            <span class="benchmark-val green">~158,000 → ~1,665</span>
+        </div>
+    </div>
+
+    <p style="color: var(--muted); font-size: 0.85rem; margin-top: 1rem;">
+        LLMR is an <strong>index</strong> with summaries, not a content mirror. AI systems use it for site comprehension and content discovery, then fetch individual pages when they need full text. The value: one fetch to understand everything, instead of crawling blind.
+    </p>
+</section>
+
+<!-- COMPARISON -->
+<section>
+    <h2><span class="num">03</span> How it compares</h2>
+    <p class="section-sub">LLMR complements <a href="https://llmstxt.org/" style="color: var(--accent);">llms.txt</a> — serve both.</p>
+
+    <table class="compare-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Raw HTML</th>
+                <th>llms.txt</th>
+                <th>LLMR</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Tokens (21 pages)</td>
+                <td class="lose">~158,000</td>
+                <td class="lose">~200 + N fetches</td>
+                <td class="win">~1,665</td>
+            </tr>
+            <tr>
+                <td>HTTP requests</td>
+                <td class="lose">21</td>
+                <td class="lose">1 + N</td>
+                <td class="win">1</td>
+            </tr>
+            <tr>
+                <td>Metadata</td>
+                <td class="lose">Parse HTML</td>
+                <td class="lose">None</td>
+                <td class="win">Structured</td>
+            </tr>
+            <tr>
+                <td>Embeddings</td>
+                <td class="lose">No</td>
+                <td class="lose">No</td>
+                <td class="win">Optional</td>
+            </tr>
+            <tr>
+                <td>Auto-generated</td>
+                <td>—</td>
+                <td class="lose">Manual</td>
+                <td class="win">Yes</td>
+            </tr>
+            <tr>
+                <td>Works together</td>
+                <td>—</td>
+                <td colspan="2" class="win" style="text-align:center;">✓ llms_txt field links them</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<!-- INSTALL -->
+<section id="install">
+    <h2><span class="num">04</span> Install</h2>
+    <p class="section-sub">Pick your platform. One command.</p>
+
+    <div class="code-block">
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('python')">Python</button>
+            <button class="tab" onclick="switchTab('npm')">npm</button>
+            <button class="tab" onclick="switchTab('wordpress')">WordPress</button>
+            <button class="tab" onclick="switchTab('laravel')">Laravel</button>
+            <button class="tab" onclick="switchTab('drupal')">Drupal</button>
+        </div>
+        <div class="tab-content active" id="tab-python">
+            <div class="install-cmd" onclick="copyCmd(this)">$ pip install llmr-generator && llmr generate ./my-site</div>
+        </div>
+        <div class="tab-content" id="tab-npm">
+            <div class="install-cmd" onclick="copyCmd(this)">$ npx @open-llmr/generator generate ./my-site</div>
+        </div>
+        <div class="tab-content" id="tab-wordpress">
+            <div class="install-cmd" onclick="copyCmd(this)">Download from wordpress.org/plugins/open-llmr</div>
+        </div>
+        <div class="tab-content" id="tab-laravel">
+            <div class="install-cmd" onclick="copyCmd(this)">$ composer require open-llmr/laravel && php artisan llmr:generate <span class="dim"># coming soon</span></div>
+        </div>
+        <div class="tab-content" id="tab-drupal">
+            <div class="install-cmd" onclick="copyCmd(this)">$ drush llmr:generate <span class="dim"># coming soon</span></div>
+        </div>
+    </div>
+
+    <p style="margin-top: 1.5rem; color: var(--muted); font-size: 0.9rem;">
+        Then add to your HTML:<br>
+        <code style="color: var(--accent); font-family: var(--mono); font-size: 0.85rem;">
+            &lt;link rel="llmr" type="application/json" href="/llmr.json"&gt;
+        </code>
+    </p>
+</section>
+
+<!-- ECOSYSTEM -->
+<section>
+    <h2><span class="num">05</span> Ecosystem</h2>
+    <p class="section-sub">Each platform gets its own repo. Own CI. Own contributors.</p>
+
+    <table class="compare-table">
+        <thead>
+            <tr><th>Package</th><th>Platform</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md" style="color:var(--accent)">spec</a></td><td>JSON Schema + fixtures</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/python" style="color:var(--accent)">python</a></td><td>pip install</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/npm" style="color:var(--accent)">npm</a></td><td>TypeScript / Node 20+</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/wordpress" style="color:var(--accent)">wordpress</a></td><td>WP 7.0 + Abilities API</td><td class="win">Live</td></tr>
+            <tr><td>laravel</td><td>Laravel 12+ / Composer</td><td class="lose">Planned</td></tr>
+            <tr><td>drupal</td><td>Drupal 11+ / Drush</td><td class="lose">Planned</td></tr>
+        </tbody>
+    </table>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <p>
+        Built by <a href="https://raphaelreck.com">Raphaël Reck</a> &bull;
+        <a href="https://gitlab.com/open-llmr">GitLab</a> &bull;
+        <a href="https://github.com/djassoRaph/open_llmr">GitHub</a> &bull;
+        <a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md">Spec</a> &bull;
+        MIT License
+    </p>
+    <p style="margin-top: 0.5rem; color: var(--muted);">
+        LLMR complements <a href="https://llmstxt.org/">llms.txt</a> — serve both.
+    </p>
+</footer>
+
+<script src="script.js"></script>
+
+</body>
+</html>
