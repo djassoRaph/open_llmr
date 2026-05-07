@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /config/
+Disallow: /generate.php
+
+Sitemap: https://open-llmr.org/sitemap.xml
+LLMR: https://open-llmr.org/llmr.json

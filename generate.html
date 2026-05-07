@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>LLMR Generator — Try it live</title>
+    <meta name="description" content="Paste any URL and get a ready-to-deploy llmr.json in seconds. Free, open source.">
+    <meta name="author" content="Raphaël Reck">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://open-llmr.org/generate">
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml">
+
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://open-llmr.org/generate">
+    <meta property="og:site_name" content="LLMR">
+    <meta property="og:title" content="LLMR Generator — Try it live">
+    <meta property="og:description" content="Paste any URL and get a ready-to-deploy llmr.json in seconds. Free, open source.">
+    <meta property="og:image" content="https://open-llmr.org/og-image.png">
+    <meta property="og:locale" content="en_US">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://open-llmr.org/generate">
+    <meta name="twitter:title" content="LLMR Generator — Try it live">
+    <meta name="twitter:description" content="Paste any URL and get a spec-compliant llmr.json in seconds. Free, open source.">
+    <meta name="twitter:image" content="https://open-llmr.org/og-image.png">
+
+    <link rel="llmr" type="application/json" href="/llmr.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="public/style/style.css">
+    <link rel="stylesheet" href="public/style/generate.css">
+
+    <script>
+        (function() {
+            var t = localStorage.getItem('llmr-theme') ||
+                    (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
+</head>
+<body>
+
+<nav>
+    <a class="nav-logo" href="/">LLMR<span>.</span></a>
+    <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/about">About</a>
+        <button class="theme-toggle" id="themeToggle" aria-label="Switch to light mode">☀</button>
+    </div>
+</nav>
+
+<div class="page">
+
+    <h1 class="page-title">Try the <span>generator</span></h1>
+    <p class="page-sub">
+        Paste any public URL. We discover your sitemap, crawl up to 25 pages in parallel,
+        and generate a spec-compliant <code>llmr.json</code> with AI-written summaries.
+        For unlimited pages <a href="/#install">install the CLI</a>.
+    </p>
+
+    <div class="input-row">
+        <input id="urlInput" class="url-input" type="url" placeholder="https://yourdomain.com" autocomplete="off" spellcheck="false" />
+        <button id="genBtn" class="btn btn-primary" onclick="generate()">Generate &rarr;</button>
+    </div>
+
+    <!-- Shown only on sitemap_not_found — JS controls display -->
+    <div class="input-row" id="sitemapRow" style="display:none">
+        <input id="sitemapInput" class="url-input" type="url" placeholder="https://yourdomain.com/sitemap.xml" autocomplete="off" spellcheck="false" />
+        <button id="retryBtn" class="btn btn-primary" onclick="retryWithSitemap()">Retry &rarr;</button>
+    </div>
+
+    <p class="hint">Press Enter or click Generate. Site must have a <code>sitemap.xml</code> — capped at 25 pages.</p>
+
+    <div class="ex-label">Try an example:</div>
+    <div class="examples">
+        <button class="ex-btn" onclick="setUrl('https://raphaelreck.com')">raphaelreck.com</button>
+        <button class="ex-btn" onclick="setUrl('https://open-llmr.org')">open-llmr.org</button>
+        <button class="ex-btn" onclick="setUrl('https://simonwillison.net')">simonwillison.net</button>
+        <button class="ex-btn" onclick="setUrl('https://example.com')">example.com</button>
+    </div>
+
+    <div class="status" id="status">
+        <div class="spinner"></div>
+        <div class="status-txt" id="statusTxt">
+            <span id="statusMsg">Looking for sitemap…</span><span id="elapsed"></span>
+        </div>
+    </div>
+
+    <div class="error" id="error"></div>
+    <div class="warning" id="warning"></div>
+
+    <div class="stats" id="stats">
+        <div class="stat"><div class="stat-lbl">Pages indexed</div><div class="stat-val" id="sPages">1</div></div>
+        <div class="stat"><div class="stat-lbl">Est. reduction</div><div class="stat-val" id="sRed">—</div></div>
+        <div class="stat"><div class="stat-lbl">File size</div><div class="stat-val" id="sSize">—</div></div>
+    </div>
+
+    <div class="result" id="result">
+        <div class="result-hdr">
+            <div class="result-meta">
+                <span class="result-file">llmr.json</span>
+                <span class="result-info" id="rInfo"></span>
+                <span class="copy-ok" id="copyOk">copied!</span>
+            </div>
+            <div class="result-actions">
+                <button class="btn btn-ghost btn--xs" onclick="copyJson()">Copy</button>
+                <button class="btn btn-primary btn--xs" onclick="downloadJson()">Download</button>
+            </div>
+        </div>
+        <div class="code" id="code"></div>
+    </div>
+
+    <div class="howto">
+        <h2>What to do with the file</h2>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">01</div>
+                <div class="step-body">
+                    <strong>Upload</strong> <code>llmr.json</code> to your website root — same place as <code>robots.txt</code>.
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">02</div>
+                <div class="step-body">
+                    <strong>Add a link tag</strong> to your HTML <code>&lt;head&gt;</code>:<br>
+                    <code>&lt;link rel="llmr" type="application/json" href="/llmr.json"&gt;</code>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">03</div>
+                <div class="step-body">
+                    <strong>For a full multi-page index</strong>, install the CLI — it crawls every page at once.<br>
+                    <code>pip install llmr-generator &amp;&amp; llmr generate ./my-site</code>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<footer>
+    <p>
+        Built by <a href="https://raphaelreck.com" rel="author">Raphaël Reck</a> &bull;
+        <a href="/">Home</a> &bull;
+        <a href="/about">About</a> &bull;
+        <a href="https://gitlab.com/open-llmr">GitLab</a> &bull;
+        <a href="https://github.com/djassoRaph/open_llmr">GitHub</a> &bull;
+        MIT License
+    </p>
+    <p class="footer-note">LLMR complements <a href="https://llmstxt.org/">llms.txt</a> — serve both.</p>
+</footer>
+
+<script src="public/script/theme.js"></script>
+<script src="public/script/generate.js"></script>
+
+</body>
+</html>

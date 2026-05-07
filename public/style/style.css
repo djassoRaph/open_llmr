@@ -1,0 +1,531 @@
+/* ================================================================
+   style.css — LLMR website
+   Dark theme by default. Light theme: [data-theme="light"]
+   ================================================================ */
+
+/* --- VARIABLES (dark default) --- */
+:root {
+    --bg:      #0a0a0b;
+    --surface: #141416;
+    --surface2:#1a1a1e;
+    --border:  #2a2a2e;
+    --text:    #e4e4e7;
+    --muted:   #71717a;
+    --accent:  #22d3ee;
+    --accent2: #a78bfa;
+    --red:     #f87171;
+    --green:   #4ade80;
+    --mono:    'JetBrains Mono', monospace;
+    --sans:    'DM Sans', system-ui, sans-serif;
+}
+
+/* --- LIGHT THEME --- */
+[data-theme="light"] {
+    --bg:      #ffffff;
+    --surface: #f4f4f5;
+    --surface2:#e4e4e7;
+    --border:  #d4d4d8;
+    --text:    #09090b;
+    --muted:   #52525b;
+    --accent:  #0891b2;
+    --accent2: #7c3aed;
+    --red:     #dc2626;
+    --green:   #16a34a;
+}
+
+/* --- RESET --- */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* --- NAV --- */
+nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+}
+
+.nav-logo {
+    font-family: var(--mono);
+    font-weight: 800;
+    font-size: 16px;
+    color: var(--text);
+    text-decoration: none;
+    letter-spacing: -0.5px;
+}
+
+.nav-logo span { color: var(--accent); }
+
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.nav-links a {
+    font-size: 13px;
+    color: var(--muted);
+    font-family: var(--mono);
+    text-decoration: none;
+    transition: color .15s;
+}
+
+.nav-links a:hover { color: var(--text); }
+
+/* --- THEME TOGGLE BUTTON --- */
+.theme-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 15px;
+    padding: 4px 9px;
+    line-height: 1;
+    transition: all .2s;
+}
+
+.theme-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* --- HERO --- */
+.hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.hero::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(34,211,238,0.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 80%, rgba(167,139,250,0.04) 0%, transparent 50%);
+    pointer-events: none;
+}
+
+[data-theme="light"] .hero::before {
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(8,145,178,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 80%, rgba(124,58,237,0.06) 0%, transparent 50%);
+}
+
+.hero--compact {
+    min-height: auto;
+    padding-top: 3rem;
+    padding-bottom: 1rem;
+}
+
+.badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid rgba(34,211,238,0.3);
+    padding: 0.4rem 1rem;
+    border-radius: 99px;
+    margin-bottom: 2rem;
+    animation: fadeIn 0.6s ease-out;
+}
+
+[data-theme="light"] .badge { border-color: rgba(8,145,178,0.4); }
+
+h1 {
+    font-family: var(--mono);
+    font-size: clamp(2.5rem, 6vw, 5rem);
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 1.5rem;
+    animation: fadeIn 0.6s ease-out 0.1s both;
+}
+
+h1 .accent { color: var(--accent); }
+
+.subtitle {
+    font-size: clamp(1.1rem, 2vw, 1.4rem);
+    color: var(--muted);
+    max-width: 600px;
+    margin-bottom: 3rem;
+    animation: fadeIn 0.6s ease-out 0.2s both;
+}
+
+/* --- TOKEN COUNTER --- */
+.counter-wrap {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    margin-bottom: 3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeIn 0.8s ease-out 0.4s both;
+}
+
+.counter { text-align: center; }
+
+.counter-num {
+    font-family: var(--mono);
+    font-size: clamp(2.5rem, 5vw, 4rem);
+    font-weight: 800;
+    line-height: 1;
+}
+
+.counter-label { font-size: 0.85rem; color: var(--muted); margin-top: 0.25rem; }
+
+.counter-old .counter-num {
+    color: var(--red);
+    text-decoration: line-through;
+    text-decoration-thickness: 3px;
+    opacity: 0.6;
+}
+
+.counter-new .counter-num { color: var(--green); }
+
+.counter-arrow { font-size: 2rem; color: var(--accent); }
+
+.counter-pct {
+    font-family: var(--mono);
+    font-size: clamp(3rem, 6vw, 5rem);
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+}
+
+.counter-pct-label { font-size: 0.85rem; color: var(--muted); }
+
+/* --- BUTTONS & CTA --- */
+.cta-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeIn 0.6s ease-out 0.5s both;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 1.6rem;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.btn-primary:hover {
+    background: #67e8f9;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(34,211,238,0.2);
+}
+
+[data-theme="light"] .btn-primary:hover { background: #06b6d4; }
+
+.btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* "Try it" button — accent2 (purple) */
+.btn-try {
+    background: transparent;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+}
+
+.btn-try:hover {
+    background: rgba(167,139,250,0.1);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(167,139,250,0.15);
+}
+
+[data-theme="light"] .btn-try:hover { background: rgba(124,58,237,0.08); }
+
+/* --- SECTIONS --- */
+section {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 5rem 2rem;
+}
+
+h2 {
+    font-family: var(--mono);
+    font-size: clamp(1.5rem, 3vw, 2.2rem);
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+}
+
+h2 .num { color: var(--accent); font-size: 0.8em; }
+
+.section-sub {
+    color: var(--muted);
+    margin-bottom: 2.5rem;
+    font-size: 1.05rem;
+}
+
+/* --- CODE BLOCK --- */
+.code-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 1.5rem 0;
+}
+
+.code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.code-body {
+    padding: 1.2rem 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    overflow-x: auto;
+}
+
+.code-body .key { color: var(--accent); }
+.code-body .str { color: var(--green); }
+.code-body .num { color: var(--accent2); }
+.code-body .dim { color: var(--muted); }
+
+/* --- INSTALL TABS --- */
+.tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+}
+
+.tab {
+    padding: 0.6rem 1.2rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+    cursor: pointer;
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.install-cmd {
+    padding: 1.2rem 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    color: var(--green);
+    cursor: pointer;
+    position: relative;
+}
+
+.install-cmd:hover::after {
+    content: 'click to copy';
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.7rem;
+    color: var(--muted);
+}
+
+/* --- COMPARISON TABLE --- */
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    margin: 1.5rem 0;
+}
+
+.compare-table th,
+.compare-table td {
+    padding: 0.8rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+.compare-table th {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.compare-table .win  { color: var(--green); font-weight: 700; }
+.compare-table .lose { color: var(--muted); }
+
+/* --- BENCHMARK --- */
+.benchmark {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+}
+
+.benchmark-title {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 1rem;
+}
+
+.benchmark-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+[data-theme="light"] .benchmark-row { border-bottom-color: rgba(0,0,0,0.06); }
+
+.benchmark-label { color: var(--muted); font-size: 0.9rem; }
+.benchmark-val   { font-family: var(--mono); font-weight: 700; }
+.benchmark-val.green { color: var(--green); }
+
+/* --- FOOTER --- */
+footer {
+    text-align: center;
+    padding: 3rem 2rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border);
+}
+
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+/* --- ANIMATIONS --- */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* --- UTILITY --- */
+.visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+}
+
+.text-center { text-align: center; }
+
+/* --- IN-TEXT LINK COLOURS --- */
+.section-sub a   { color: var(--accent); }
+.section-note a  { color: var(--accent); }
+.compare-table a { color: var(--accent); text-decoration: none; }
+.compare-table a:hover { text-decoration: underline; }
+
+/* --- PROSE (about page) --- */
+.prose {
+    font-size: 1.05rem;
+    line-height: 1.8;
+    max-width: 600px;
+    color: var(--text);
+}
+
+.prose-muted {
+    font-size: 1rem;
+    line-height: 1.8;
+    max-width: 600px;
+    color: var(--muted);
+    margin-top: 1.25rem;
+}
+
+.prose-sm {
+    font-size: 0.95rem;
+    line-height: 1.8;
+    max-width: 600px;
+    color: var(--muted);
+}
+
+.prose a,
+.prose-muted a,
+.prose-sm a { color: var(--accent); }
+
+/* --- ABOUT CTA --- */
+.about-cta { margin-top: 1.5rem; }
+.about-cta a { color: var(--accent); font-size: 0.95rem; }
+
+/* --- INLINE CODE --- */
+.code-inline {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+}
+
+/* --- NOTES --- */
+.section-note  { color: var(--muted); font-size: 0.85rem; margin-top: 1rem; }
+.install-note  { margin-top: 1.5rem; color: var(--muted); font-size: 0.9rem; }
+.footer-note   { margin-top: 0.5rem; color: var(--muted); }
+
+/* --- RESPONSIVE --- */
+@media (max-width: 640px) {
+    nav             { padding: 0.75rem 1rem; }
+    .nav-links      { gap: 1rem; }
+    .counter-wrap   { gap: 1rem; }
+    .counter-arrow  { display: none; }
+    section         { padding: 3rem 1.5rem; }
+    .cta-row        { gap: 0.75rem; }
+}

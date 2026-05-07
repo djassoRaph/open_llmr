@@ -4,52 +4,102 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <!-- Primary -->
     <title>LLMR — RSS for the AI Era</title>
-    <meta name="description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.">
+    <meta name="description" content="LLMR: one llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.">
     <meta name="author" content="Raphaël Reck">
     <meta name="keywords" content="llmr, llms.txt, AI indexing, LLM tokens, site index, RSS for AI, open source, token reduction, machine readable web">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://open-llmr.org/">
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml">
     <meta name="google-site-verification" content="CIKhMzYdtjAIRwDcUs2WtKZBkQTb6MCRo5nYR4fc11g" />
 
-    <!-- Open Graph — LinkedIn, Facebook, WhatsApp, Discord, Slack -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "LLMR",
+      "alternateName": "LLM-Readable Format",
+      "url": "https://open-llmr.org/",
+      "description": "LLMR is an open-source JSON site index format that gives AI systems your entire website in one fetch, reducing token consumption by up to 98.3% compared to raw HTML.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Any",
+      "softwareVersion": "2.0",
+      "license": "https://opensource.org/licenses/MIT",
+      "codeRepository": "https://gitlab.com/open-llmr",
+      "programmingLanguage": ["Python", "TypeScript", "PHP"],
+      "author": { "@type": "Person", "name": "Raphaël Reck", "url": "https://raphaelreck.com" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "featureList": [
+        "98.3% token reduction vs raw HTML",
+        "Single HTTP request for full site understanding",
+        "Auto-generated from existing HTML",
+        "Python, npm, and WordPress packages",
+        "Compatible with llms.txt"
+      ]
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "LLMR",
+      "url": "https://open-llmr.org/",
+      "description": "Open-source JSON site index format for AI systems. RSS for the AI era.",
+      "author": { "@type": "Person", "name": "Raphaël Reck", "url": "https://raphaelreck.com" }
+    }
+    </script>
+
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://open-llmr.org/">
     <meta property="og:site_name" content="LLMR">
     <meta property="og:title" content="LLMR — RSS for the AI Era">
-    <meta property="og:description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.">
+    <meta property="og:description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.">
     <meta property="og:image" content="https://open-llmr.org/og-image.png">
-    <meta property="og:image:secure_url" content="https://open-llmr.org/og-image.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="LLMR: 633,997 bytes of HTML shrinks to 10,974 bytes. 98.3% reduction. One fetch. Full site understanding.">
+    <meta property="og:image:alt" content="LLMR: 633,997 bytes of HTML shrinks to 10,974 bytes. 98.3% reduction.">
     <meta property="og:locale" content="en_US">
 
-    <!-- Twitter / X — summary_large_image = big card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:url" content="https://open-llmr.org/">
     <meta name="twitter:title" content="LLMR — RSS for the AI Era">
     <meta name="twitter:description" content="One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.">
     <meta name="twitter:image" content="https://open-llmr.org/og-image.png">
-    <meta name="twitter:image:alt" content="LLMR: 633,997 bytes of HTML shrinks to 10,974 bytes. 98.3% fewer tokens. One fetch.">
-    <!-- Add your handles: -->
-    <!-- <meta name="twitter:site" content="@open_llmr"> -->
-    <!-- <meta name="twitter:creator" content="@YourHandle"> -->
 
     <link rel="llmr" type="application/json" href="/llmr.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="public/style/style.css">
+
+    <!-- Apply saved theme before paint to avoid flash -->
+    <script>
+        (function() {
+            var t = localStorage.getItem('llmr-theme') ||
+                    (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body>
+
+<nav>
+    <a class="nav-logo" href="/">LLMR<span>.</span></a>
+    <div class="nav-links">
+        <a href="/about">About</a>
+        <a href="/generate">Generator</a>
+        <button class="theme-toggle" id="themeToggle" aria-label="Switch to light mode">☀</button>
+    </div>
+</nav>
+
+<main>
 
 <!-- HERO -->
 <div class="hero">
     <div class="badge">Open Source &bull; MIT License &bull; v2.0</div>
 
-    <h1>One file.<br><span class="accent">Fewer tokens.</span></h1>
+    <h1>LLMR — One file.<br><span class="accent">Fewer tokens.</span></h1>
 
     <p class="subtitle">
         LLMR is a JSON site index that gives AI systems your entire website in one fetch.
@@ -58,12 +108,12 @@
 
     <div class="counter-wrap">
         <div class="counter counter-old">
-            <div class="counter-num" id="tokens-old">633,997</div>
+            <div class="counter-num">633,997</div>
             <div class="counter-label">bytes of HTML</div>
         </div>
         <div class="counter-arrow">&rarr;</div>
         <div class="counter counter-new">
-            <div class="counter-num" id="tokens-new">10,974</div>
+            <div class="counter-num">10,974</div>
             <div class="counter-label">bytes of LLMR</div>
         </div>
         <div class="counter">
@@ -73,6 +123,7 @@
     </div>
 
     <div class="cta-row">
+        <a href="/generate.html" class="btn btn-try">Try it &rarr;</a>
         <a href="https://gitlab.com/open-llmr" class="btn btn-primary">GitLab &rarr;</a>
         <a href="#install" class="btn btn-ghost">Install</a>
         <a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md" class="btn btn-ghost">Read Spec</a>
@@ -81,7 +132,7 @@
 
 <!-- WHAT IT LOOKS LIKE -->
 <section>
-    <h2><span class="num">01</span> What it looks like</h2>
+    <h2><span class="num" aria-hidden="true">01</span> What it looks like</h2>
     <p class="section-sub">Your whole site in a JSON file. Compressed keys. Every token earns its place.</p>
 
     <div class="code-block">
@@ -112,7 +163,7 @@
 
 <!-- BENCHMARK -->
 <section>
-    <h2><span class="num">02</span> Real numbers, not estimates</h2>
+    <h2><span class="num" aria-hidden="true">02</span> Real numbers, not estimates</h2>
     <p class="section-sub">Measured on raphaelreck.com — 21 blog posts, 93 code blocks.</p>
 
     <div class="benchmark">
@@ -131,31 +182,33 @@
         </div>
         <div class="benchmark-row">
             <span class="benchmark-label">HTTP requests</span>
-            <span class="benchmark-val green">21 → 1</span>
+            <span class="benchmark-val green">21 &rarr; 1</span>
         </div>
         <div class="benchmark-row">
             <span class="benchmark-label">Estimated tokens</span>
-            <span class="benchmark-val green">~158,000 → ~1,665</span>
+            <span class="benchmark-val green">~158,000 &rarr; ~1,665</span>
         </div>
     </div>
 
-    <p style="color: var(--muted); font-size: 0.85rem; margin-top: 1rem;">
-        LLMR is an <strong>index</strong> with summaries, not a content mirror. AI systems use it for site comprehension and content discovery, then fetch individual pages when they need full text. The value: one fetch to understand everything, instead of crawling blind.
+    <p class="section-note">
+        LLMR is an <strong>index</strong> with summaries, not a content mirror. AI systems use it for site comprehension
+        and discovery, then fetch individual pages when they need full text.
     </p>
 </section>
 
 <!-- COMPARISON -->
 <section>
-    <h2><span class="num">03</span> How it compares</h2>
-    <p class="section-sub">LLMR complements <a href="https://llmstxt.org/" style="color: var(--accent);">llms.txt</a> — serve both.</p>
+    <h2><span class="num" aria-hidden="true">03</span> How it compares</h2>
+    <p class="section-sub">LLMR complements <a href="https://llmstxt.org/">llms.txt</a> — serve both.</p>
 
-    <table class="compare-table">
+    <table class="compare-table" aria-label="Comparison of LLMR vs Raw HTML vs llms.txt">
+        <caption class="visually-hidden">Token and request comparison: LLMR vs Raw HTML vs llms.txt for a 21-page site</caption>
         <thead>
             <tr>
-                <th></th>
-                <th>Raw HTML</th>
-                <th>llms.txt</th>
-                <th>LLMR</th>
+                <th scope="col">Feature</th>
+                <th scope="col">Raw HTML</th>
+                <th scope="col">llms.txt</th>
+                <th scope="col">LLMR</th>
             </tr>
         </thead>
         <tbody>
@@ -192,7 +245,7 @@
             <tr>
                 <td>Works together</td>
                 <td>—</td>
-                <td colspan="2" class="win" style="text-align:center;">✓ llms_txt field links them</td>
+                <td colspan="2" class="win text-center">&#10003; llms_txt field links them</td>
             </tr>
         </tbody>
     </table>
@@ -200,7 +253,7 @@
 
 <!-- INSTALL -->
 <section id="install">
-    <h2><span class="num">04</span> Install</h2>
+    <h2><span class="num" aria-hidden="true">04</span> Install</h2>
     <p class="section-sub">Pick your platform. One command.</p>
 
     <div class="code-block">
@@ -228,49 +281,54 @@
         </div>
     </div>
 
-    <p style="margin-top: 1.5rem; color: var(--muted); font-size: 0.9rem;">
+    <p class="install-note">
         Then add to your HTML:<br>
-        <code style="color: var(--accent); font-family: var(--mono); font-size: 0.85rem;">
-            &lt;link rel="llmr" type="application/json" href="/llmr.json"&gt;
-        </code>
+        <code class="code-inline">&lt;link rel="llmr" type="application/json" href="/llmr.json"&gt;</code>
     </p>
 </section>
 
 <!-- ECOSYSTEM -->
 <section>
-    <h2><span class="num">05</span> Ecosystem</h2>
+    <h2><span class="num" aria-hidden="true">05</span> Ecosystem</h2>
     <p class="section-sub">Each platform gets its own repo. Own CI. Own contributors.</p>
 
-    <table class="compare-table">
+    <table class="compare-table" aria-label="LLMR ecosystem packages">
+        <caption class="visually-hidden">LLMR ecosystem: available packages by platform and status</caption>
         <thead>
-            <tr><th>Package</th><th>Platform</th><th>Status</th></tr>
+            <tr>
+                <th scope="col">Package</th>
+                <th scope="col">Platform</th>
+                <th scope="col">Status</th>
+            </tr>
         </thead>
         <tbody>
-            <tr><td><a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md" style="color:var(--accent)">spec</a></td><td>JSON Schema + fixtures</td><td class="win">Live</td></tr>
-            <tr><td><a href="https://gitlab.com/open-llmr/python" style="color:var(--accent)">python</a></td><td>pip install</td><td class="win">Live</td></tr>
-            <tr><td><a href="https://gitlab.com/open-llmr/npm" style="color:var(--accent)">npm</a></td><td>TypeScript / Node 20+</td><td class="win">Live</td></tr>
-            <tr><td><a href="https://gitlab.com/open-llmr/wordpress" style="color:var(--accent)">wordpress</a></td><td>WP 7.0 + Abilities API</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md">spec</a></td><td>JSON Schema + fixtures</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/python">python</a></td><td>pip install</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/npm">npm</a></td><td>TypeScript / Node 20+</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/wordpress">wordpress</a></td><td>WP 7.0 + Abilities API</td><td class="win">Live</td></tr>
             <tr><td>laravel</td><td>Laravel 12+ / Composer</td><td class="lose">Planned</td></tr>
             <tr><td>drupal</td><td>Drupal 11+ / Drush</td><td class="lose">Planned</td></tr>
         </tbody>
     </table>
 </section>
 
-<!-- FOOTER -->
+</main>
+
 <footer>
     <p>
         Built by <a href="https://raphaelreck.com">Raphaël Reck</a> &bull;
+        <a href="/about">About</a> &bull;
+        <a href="/generate">Generator</a> &bull;
         <a href="https://gitlab.com/open-llmr">GitLab</a> &bull;
         <a href="https://github.com/djassoRaph/open_llmr">GitHub</a> &bull;
         <a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md">Spec</a> &bull;
         MIT License
     </p>
-    <p style="margin-top: 0.5rem; color: var(--muted);">
-        LLMR complements <a href="https://llmstxt.org/">llms.txt</a> — serve both.
-    </p>
+    <p class="footer-note">LLMR complements <a href="https://llmstxt.org/">llms.txt</a> — serve both.</p>
 </footer>
 
-<script src="script.js"></script>
+<script src="public/script/theme.js"></script>
+<script src="public/script/script.js"></script>
 
 </body>
 </html>
