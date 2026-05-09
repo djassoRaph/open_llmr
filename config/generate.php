@@ -444,16 +444,6 @@ $scheme = strtolower((string) parse_url($inputUrl, PHP_URL_SCHEME));
 $host   = (string) parse_url($inputUrl, PHP_URL_HOST);
 $origin = $scheme . '://' . $host;
 
-// ─── IP rate limit — checked before any outbound fetch ───────────────────────
-// 1 generation per IP per 24 h. Comment out the block below to disable.
-$ip      = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-$logFile = __DIR__ . '/../data/ip_log.json';
-$rate    = checkRateLimit($ip, $logFile);
-if ($rate['limited']) {
-    echo json_encode(['error' => 'rate_limited', 'next_available' => $rate['next']]);
-    exit;
-}
-
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MODE A — Discovery only (no sitemap_url provided)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -472,6 +462,14 @@ if ($sitemapUrl === '') {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MODE B — Full processing (sitemap_url provided)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── IP rate limit — 1 generation per IP per 24 h ────────────────────────────
+$ip      = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+$logFile = __DIR__ . '/../data/ip_log.json';
+$rate    = checkRateLimit($ip, $logFile);
+if ($rate['limited']) {
+    echo json_encode(['error' => 'rate_limited', 'next_available' => $rate['next']]);
+    exit;
+}
 
 // Validate user-supplied sitemap URL
 if (!filter_var($sitemapUrl, FILTER_VALIDATE_URL) || !isSafeUrl($sitemapUrl)) {
