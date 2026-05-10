@@ -1,0 +1,104 @@
+# ============================================================
+#  open-llmr.org — Apache configuration
+# ============================================================
+
+Options -Indexes -MultiViews
+
+RewriteEngine On
+
+# ------------------------------------------------------------
+#  HTTPS
+# ------------------------------------------------------------
+RewriteCond %{HTTPS} off
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+# ------------------------------------------------------------
+#  Canonical host — drop www
+# ------------------------------------------------------------
+RewriteCond %{HTTP_HOST} ^www\.open-llmr\.org$ [NC]
+RewriteRule ^ https://open-llmr.org%{REQUEST_URI} [R=301,L]
+
+# ------------------------------------------------------------
+#  Extensionless URL redirects (old links / sitemap was wrong)
+# ------------------------------------------------------------
+RewriteRule ^about$    /about.html    [R=301,L]
+RewriteRule ^generate$ /generate.html [R=301,L]
+
+# ------------------------------------------------------------
+#  Security headers
+# ------------------------------------------------------------
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options    "nosniff"
+    Header always set X-Frame-Options           "SAMEORIGIN"
+    Header always set Referrer-Policy           "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy        "geolocation=(), microphone=(), camera=()"
+
+    # Content Security Policy
+    # - Google Fonts for stylesheets + fonts
+    # - No inline scripts (theme init is the one exception — kept as a hash if needed)
+    Header always set Content-Security-Policy \
+        "default-src 'self'; \
+         script-src 'self' 'unsafe-inline'; \
+         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+         font-src 'self' https://fonts.gstatic.com; \
+         img-src 'self' data:; \
+         connect-src 'self'; \
+         frame-ancestors 'none'"
+
+    # Allow any origin to fetch llmr.json (that's the whole point of the format)
+    <FilesMatch "^llmr\.json$">
+        Header always set Access-Control-Allow-Origin "*"
+        Header always set Access-Control-Allow-Methods "GET"
+    </FilesMatch>
+</IfModule>
+
+# ------------------------------------------------------------
+#  MIME types
+# ------------------------------------------------------------
+<IfModule mod_mime.c>
+    AddType application/json          .json
+    AddType application/xml           .xml
+    AddType image/svg+xml             .svg
+    AddType font/woff2                .woff2
+</IfModule>
+
+# ------------------------------------------------------------
+#  Compression
+# ------------------------------------------------------------
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript \
+                                  application/json application/xml \
+                                  image/svg+xml font/woff2
+</IfModule>
+
+# ------------------------------------------------------------
+#  Cache control
+# ------------------------------------------------------------
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # HTML — short cache, always revalidate
+    ExpiresByType text/html                         "access plus 1 hour"
+
+    # Versioned assets — can be cached long
+    ExpiresByType text/css                          "access plus 1 year"
+    ExpiresByType application/javascript            "access plus 1 year"
+    ExpiresByType font/woff2                        "access plus 1 year"
+    ExpiresByType image/svg+xml                     "access plus 1 year"
+    ExpiresByType image/png                         "access plus 1 year"
+    ExpiresByType image/webp                        "access plus 1 year"
+    ExpiresByType image/x-icon                      "access plus 1 year"
+
+    # llmr.json — crawlers should refresh daily
+    ExpiresByType application/json                  "access plus 1 day"
+
+    # sitemap — weekly
+    ExpiresByType application/xml                   "access plus 1 week"
+</IfModule>
+
+# ------------------------------------------------------------
+#  Block access to sensitive files
+# ------------------------------------------------------------
+<FilesMatch "(^\.env|\.bak$|\.log$|\.md$|CLAUDE\.md)">
+    Require all denied
+</FilesMatch>
