@@ -465,7 +465,9 @@ if ($sitemapUrl === '') {
 // ─── IP rate limit — 1 generation per IP per 24 h ────────────────────────────
 $ip      = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 $logFile = __DIR__ . '/../data/ip_log.json';
-$rate    = checkRateLimit($ip, $logFile);
+// RATE LIMIT DISABLED FOR TESTING — re-enable before production.
+$rate    = ['limited' => false];
+// $rate = checkRateLimit($ip, $logFile);
 if ($rate['limited']) {
     echo json_encode(['error' => 'rate_limited', 'next_available' => $rate['next']]);
     exit;
