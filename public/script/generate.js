@@ -4,6 +4,10 @@
  *   idle → discovering → fetching → summarizing → done
  *              └→ sitemap_not_found → (user enters URL) → fetching → …
  *   any → rate_limited | error
+ *
+ * Two requests per run: discovery (Mode A, 30 per hour) then generation (Mode B,
+ * 1 per day). Generation is skipped when discovery finds no pages, so an empty
+ * sitemap never uses up the day's run.
  */
 
 let state          = 'idle';
@@ -98,7 +102,8 @@ function setState(s, data = {}) {
             showStatus(`Fetching${n} pages…`);
             // Show cap warning upfront so user knows before the timer starts
             if (data.pages_found && data.pages_found > 25) {
-                pendingWarning = `Found ${data.pages_found.toLocaleString()} pages — sampling 25 at random.`;
+                const found = data.pages_found.toLocaleString() + (data.pages_capped ? '+' : '');
+                pendingWarning = `Found ${found} pages. Sampling 25 at random.`;
                 showWarning(pendingWarning);
             }
             // After 8 s transition to summarizing
@@ -127,7 +132,7 @@ function setState(s, data = {}) {
         case 'sitemap_not_found':
             genBtn.disabled = false;
             document.getElementById('sitemapRow').style.display = 'flex';
-            showError('No sitemap found automatically. Enter your sitemap URL to continue:');
+            showError(data.message || 'No sitemap found automatically. Enter your sitemap URL to continue:');
             break;
 
         case 'rate_limited': {
@@ -143,7 +148,7 @@ function setState(s, data = {}) {
             genBtn.disabled = false;
             _populateResult(data);
             if (data.warning === 'capped_at_25') {
-                showWarning('Result capped at 25 pages — random sample applied.');
+                showWarning('Result capped at 25 pages: random sample applied.');
             } else if (data.warning) {
                 showWarning(data.warning);
             }
@@ -197,9 +202,55 @@ async function _post(payload) {
     return { resp, data };
 }
 
+// Why the server refused a URL (refused_url.reason)
+const REFUSAL_REASONS = {
+    bad_url:         'it is not a valid web address.',
+    bad_scheme:      'only http:// and https:// addresses are supported.',
+    bad_port:        'only the standard web ports (80 and 443) are allowed.',
+    bad_host:        'the host is not a public domain name or IP address.',
+    credentials:     'addresses with a username or password are not allowed.',
+    dns_failed:      'the domain does not resolve. Check the spelling.',
+    private_address: 'it points to a private, local or reserved network address.',
+    off_origin:      'the sitemap must be on the same site as the URL above (www. and the bare domain both count).',
+};
+
+function _refusedMessage(data) {
+    const what = data.field === 'sitemap_url' ? 'That sitemap URL' : 'That URL';
+    return `${what} can't be used: ${REFUSAL_REASONS[data.reason] || 'it cannot be fetched.'}`;
+}
+
 function _handleError(data, resp) {
     if (data.error === 'sitemap_not_found') { setState('sitemap_not_found'); return true; }
     if (data.error === 'rate_limited')       { setState('rate_limited', data); return true; }
+    if (data.error === 'discovery_rate_limited') {
+        const next = data.next_available ? new Date(data.next_available).toLocaleTimeString() : 'an hour';
+        setState('error', { message: `Too many sitemap lookups from your network this hour. Try again after ${next}.` });
+        return true;
+    }
+    if (data.error === 'refused_url' || data.error === 'invalid_sitemap_url') {
+        const message = data.error === 'refused_url'
+            ? _refusedMessage(data)
+            : 'That sitemap URL is not a valid web address.';
+        // A bad sitemap URL can be fixed in place, so keep the sitemap field on screen
+        if (data.error === 'invalid_sitemap_url' || data.field === 'sitemap_url') {
+            setState('sitemap_not_found', { message });
+        } else {
+            setState('error', { message });
+        }
+        return true;
+    }
+    if (data.error === 'sitemap_empty') {
+        setState('error', { message: 'The sitemap lists no pages on this site.' });
+        return true;
+    }
+    if (data.error === 'fetch_failed') {
+        setState('error', { message: 'None of the sampled pages could be fetched as HTML.' });
+        return true;
+    }
+    if (data.error === 'rate_limit_unavailable') {
+        setState('error', { message: 'The generator is temporarily unavailable. Please try again later.' });
+        return true;
+    }
     if (data.error)                          { setState('error', { message: 'Server error: ' + data.error }); return true; }
     if (!resp.ok)                            { setState('error', { message: `HTTP ${resp.status}` }); return true; }
     return false;
@@ -218,11 +269,19 @@ async function generate() {
         const { resp, data } = await _post({ url });
         if (_handleError(data, resp)) return;
 
-        // Discovery succeeded — data = { sitemap_url, pages_found }
+        // Discovery succeeded — data = { sitemap_url, pages_found, pages_capped? }
         const sitemapUrl  = data.sitemap_url;
         const pagesFound  = data.pages_found || 0;
 
-        setState('fetching', { pages_found: pagesFound });
+        // Nothing to generate from: stop here rather than spend the day's generation
+        if (!pagesFound) {
+            setState('sitemap_not_found', {
+                message: `Found ${sitemapUrl}, but it lists no pages on this site. Enter another sitemap URL:`,
+            });
+            return;
+        }
+
+        setState('fetching', { pages_found: pagesFound, pages_capped: data.pages_capped });
 
         // Step 2 — full processing
         const { resp: resp2, data: data2 } = await _post({ url, sitemap_url: sitemapUrl });

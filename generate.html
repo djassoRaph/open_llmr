@@ -41,7 +41,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="public/style/style.css">
-    <link rel="stylesheet" href="public/style/generate.css">
+    <link rel="stylesheet" href="public/style/generate.css?v=2.1">
 
     <script>
         (function() {
@@ -87,7 +87,7 @@
         <button id="retryBtn" class="btn btn-primary" onclick="retryWithSitemap()">Retry &rarr;</button>
     </div>
 
-    <p class="hint">Press Enter or click Generate. Site must have a <code>sitemap.xml</code>, capped at 25 pages.</p>
+    <p class="hint">Press Enter or click Generate. Site must have a <code>sitemap.xml</code> listing pages on the same domain, capped at 25 pages.</p>
 
     <div class="ex-label">Try an example:</div>
     <div class="examples">
@@ -147,6 +147,16 @@
             <div class="step">
                 <div class="step-num">03</div>
                 <div class="step-body">
+                    <strong>Pair it with llms.txt.</strong> Serve both files: <code>/llms.txt</code> is the curated front door,
+                    <code>llmr.json</code> the complete index. In your <code>llms.txt</code>, link the index under <code>## Optional</code>:<br>
+                    <code>- [LLMR site index](https://yourdomain.com/llmr.json): every page as structured JSON (type, date, summary, keywords)</code><br>
+                    If your site already serves <code>/llms.txt</code>, the generator links it from <code>s.llms_txt</code>.
+                    See ours: <a href="/llms.txt">open-llmr.org/llms.txt</a>.
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">04</div>
+                <div class="step-body">
                     <strong>For a full multi-page index</strong>, install the CLI; it crawls every page at once.<br>
                     <code>pip install llmr-generator &amp;&amp; llmr generate ./my-site</code>
                 </div>
@@ -169,7 +179,7 @@
 </footer>
 
 <script src="public/script/theme.js"></script>
-<script src="public/script/generate.js"></script>
+<script src="public/script/generate.js?v=2.1"></script>
 
 </body>
 </html>
