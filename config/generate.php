@@ -3,28 +3,82 @@
  * config/generate.php — LLMR multi-page sitemap generator endpoint
  *
  * Mode A — Discovery (no sitemap_url in body):
- *   Discovers sitemap, returns { sitemap_url, pages_found } or { error }
+ *   Rate-limits (30 per IP per hour), discovers the sitemap,
+ *   returns { sitemap_url, pages_found, pages_capped? } or { error }
  *
  * Mode B — Processing (sitemap_url provided):
- *   Rate-limits, fetches all pages in parallel, calls Mistral per-page,
- *   returns { llmr, stats, warning?, warning_mistral? }
+ *   Validates all input, then rate-limits (1 per IP per 24 h), fetches pages in
+ *   parallel, calls Mistral per-page, returns { llmr, stats, warning?, warning_mistral? }
+ *
+ * Every outbound fetch (sitemaps, robots.txt, pages, llms.txt) goes through
+ * fetchMany(): http/https on port 80 or 443 only, every A/AAAA record of the host
+ * must be public, curl is pinned to the checked address, redirects are followed
+ * by hand and checked again at each hop, and bodies are capped while streaming.
+ * Sitemaps and pages must stay on the submitted host (or its www./apex twin).
+ *
+ * tools/test_generate.php loads this file as a library by defining LLMR_GENERATE_LIB.
  */
 
 declare(strict_types=1);
-set_time_limit(120);
 
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+// ─── Limits ───────────────────────────────────────────────────────────────────
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
-}
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => 'method_not_allowed']);
-    exit;
+const LLMR_VERSION    = '2.1';
+const LLMR_UA         = 'LLMRBot/2.1 (+https://open-llmr.org)';
+
+const MAX_REDIRECTS   = 3;
+const CONNECT_TIMEOUT = 5;                  // seconds
+const CAP_PAGE        = 2 * 1024 * 1024;    // HTML page
+const CAP_SITEMAP     = 5 * 1024 * 1024;    // sitemap or sitemap index
+const CAP_TEXT        = 256 * 1024;         // robots.txt, llms.txt
+const MAX_LOCS        = 5000;               // <loc> entries read from one sitemap
+const MAX_PAGES       = 25;                 // pages processed per generation
+
+const DISCOVERY_LIMIT   = 30;               // Mode A: lookups per IP ...
+const DISCOVERY_WINDOW  = 3600;             // ... per hour
+const GENERATION_LIMIT  = 1;                // Mode B: generations per IP ...
+const GENERATION_WINDOW = 86400;            // ... per 24 h
+
+const ACCEPT_HTML = 'text/html,application/xhtml+xml';
+const ACCEPT_XML  = 'application/xml,text/xml;q=0.9,*/*;q=0.8';
+const ACCEPT_TEXT = 'text/plain,text/markdown;q=0.9,*/*;q=0.8';
+
+// Addresses we never connect to. IPv6 is checked against an allowlist (global
+// unicast 2000::/3) first, so only blocked ranges inside it are listed.
+const BLOCKED_V4 = [
+    '0.0.0.0/8',        // "this network", unspecified
+    '10.0.0.0/8',       // private
+    '100.64.0.0/10',    // carrier-grade NAT (also cloud metadata, e.g. 100.100.100.200)
+    '127.0.0.0/8',      // loopback
+    '169.254.0.0/16',   // link-local (cloud metadata 169.254.169.254)
+    '172.16.0.0/12',    // private
+    '192.0.0.0/24',     // IETF protocol assignments
+    '192.0.2.0/24',     // documentation
+    '192.88.99.0/24',   // 6to4 relay anycast
+    '192.168.0.0/16',   // private
+    '198.18.0.0/15',    // benchmarking
+    '198.51.100.0/24',  // documentation
+    '203.0.113.0/24',   // documentation
+    '224.0.0.0/4',      // multicast
+    '240.0.0.0/4',      // reserved, broadcast
+];
+const BLOCKED_V6 = [
+    '2001::/23',        // IETF protocol assignments (Teredo, benchmarking, ORCHID)
+    '2001:db8::/32',    // documentation
+    '3fff::/20',        // documentation
+];
+
+// ─── Test seams ───────────────────────────────────────────────────────────────
+
+/** DNS and HTTP hooks. Null means real DNS and real curl; the test harness swaps in stubs. */
+final class Net
+{
+    /** fn(string $host): list<string>|false */
+    public static ?Closure $resolver = null;
+    /** fn(array $requests): array, one response per request key (see curlExchange) */
+    public static ?Closure $transport = null;
+    /** Per-request DNS answers, so one host is looked up once and every fetch pins the same address */
+    public static array $dnsCache = [];
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -44,56 +98,521 @@ function loadEnv(string $path): void
     }
 }
 
-loadEnv(__DIR__ . '/../.env');
+// ─── SSRF guard: addresses ────────────────────────────────────────────────────
 
-$MISTRAL_KEY      = $_ENV['MISTRAL_API_KEY']  ?? '';
-$MISTRAL_MODEL    = $_ENV['MISTRAL_MODEL']    ?? 'mistral-small-latest';
-$MISTRAL_ENDPOINT = $_ENV['MISTRAL_ENDPOINT'] ?? 'https://api.mistral.ai/v1/chat/completions';
-$MISTRAL_TIMEOUT  = (int) ($_ENV['MISTRAL_TIMEOUT'] ?? 20);
-
-// ─── SSRF guard ───────────────────────────────────────────────────────────────
-
-function isSafeUrl(string $url): bool
+function cidrMatch(string $packed, string $cidr): bool
 {
-    $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-    if (!in_array($scheme, ['http', 'https'], true)) {
+    [$net, $bits] = explode('/', $cidr);
+    $netPacked = inet_pton($net);
+    if ($netPacked === false || strlen($netPacked) !== strlen($packed)) {
         return false;
     }
-    $host = (string) parse_url($url, PHP_URL_HOST);
-    if ($host === '') {
+    $bits  = (int) $bits;
+    $bytes = intdiv($bits, 8);
+    if (substr($packed, 0, $bytes) !== substr($netPacked, 0, $bytes)) {
         return false;
     }
-    $ip = gethostbyname($host);
-    return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+    $rest = $bits % 8;
+    if ($rest === 0) {
+        return true;
+    }
+    $mask = (0xFF << (8 - $rest)) & 0xFF;
+    return (ord($packed[$bytes]) & $mask) === (ord($netPacked[$bytes]) & $mask);
 }
 
-// ─── Generic HTTP fetch ───────────────────────────────────────────────────────
-
-function fetchText(string $url, int $timeout = 10): string|false
+function isPublicIp(string $ip): bool
 {
-    if (!isSafeUrl($url)) {
+    $packed = @inet_pton($ip);
+    if ($packed === false) {
         return false;
     }
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS      => 3,
-        CURLOPT_TIMEOUT        => $timeout,
-        CURLOPT_USERAGENT      => 'LLMRBot/2.0 (+https://open-llmr.org)',
-    ]);
-    $body     = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($body === false || $httpCode < 200 || $httpCode >= 400) {
+
+    if (strlen($packed) === 16) {
+        // IPv4 wrapped in IPv6 (mapped ::ffff:0:0/96, NAT64 64:ff9b::/96): judge the IPv4 inside
+        if (cidrMatch($packed, '::ffff:0:0/96') || cidrMatch($packed, '64:ff9b::/96')) {
+            return isPublicIp((string) inet_ntop(substr($packed, 12)));
+        }
+        // 6to4 carries an IPv4 address in bits 16-47
+        if (cidrMatch($packed, '2002::/16') && !isPublicIp((string) inet_ntop(substr($packed, 2, 4)))) {
+            return false;
+        }
+        // Everything outside global unicast is refused: ::, ::1, fc00::/7, fe80::/10, ff00::/8, ...
+        if (!cidrMatch($packed, '2000::/3')) {
+            return false;
+        }
+        foreach (BLOCKED_V6 as $cidr) {
+            if (cidrMatch($packed, $cidr)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    foreach (BLOCKED_V4 as $cidr) {
+        if (cidrMatch($packed, $cidr)) {
+            return false;
+        }
+    }
+    return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+}
+
+// ─── SSRF guard: hosts and URLs ───────────────────────────────────────────────
+
+/**
+ * Normalise a URL host to [host, kind] with kind 'ipv4', 'ipv6' or 'name', or false.
+ * Only canonical dotted-quad IPv4 is accepted: decimal (2130706433), octal (0177.0.0.1),
+ * hex (0x7f.0.0.1) and short (127.1) forms are refused, because curl reads them as IPs.
+ */
+function normalizeHost(string $host): array|false
+{
+    if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
+        $literal = substr($host, 1, -1);
+        if (filter_var($literal, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false) {
+            return false; // includes zone IDs such as fe80::1%eth0
+        }
+        return [(string) inet_ntop((string) inet_pton($literal)), 'ipv6'];
+    }
+
+    $host = strtolower($host);
+    if (str_ends_with($host, '.')) {
+        $host = substr($host, 0, -1);
+    }
+
+    $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
+    if (preg_match("/^{$octet}(?:\\.{$octet}){3}$/", $host)) {
+        return [$host, 'ipv4'];
+    }
+
+    if (preg_match('/[^\x21-\x7e]/', $host)) {
+        // Internationalised domain name: compare and connect in its ASCII (punycode) form
+        if (!function_exists('idn_to_ascii')) {
+            return false;
+        }
+        $ascii = idn_to_ascii($host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
+        if ($ascii === false || $ascii === '') {
+            return false;
+        }
+        $host = strtolower($ascii);
+    }
+
+    if (strlen($host) > 253) {
         return false;
     }
-    return (string) $body;
+    $labels = explode('.', $host);
+    if (count($labels) < 2) {
+        return false; // localhost, intranet names, bare numbers
+    }
+    foreach ($labels as $label) {
+        if (!preg_match('/^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/', $label)) {
+            return false;
+        }
+    }
+    // A numeric or 0x last label makes curl read the whole host as an IPv4 address
+    $tld = end($labels);
+    if (!preg_match('/^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/', $tld)) {
+        return false;
+    }
+    $special = ['localhost', 'local', 'localdomain', 'internal', 'intranet', 'lan', 'home', 'corp',
+                'test', 'example', 'invalid', 'onion', 'arpa'];
+    if (in_array($tld, $special, true)) {
+        return false;
+    }
+    return [$host, 'name'];
+}
+
+/** The submitted host plus its www./apex twin. */
+function scopeHosts(string $host): array
+{
+    if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+        return [$host];
+    }
+    $apex = str_starts_with($host, 'www.') ? substr($host, 4) : $host;
+    return array_values(array_unique([$host, $apex, 'www.' . $apex]));
+}
+
+/** Cheap check, no DNS: is this an http(s) URL on port 80/443 of one of the scope hosts? */
+function inScope(string $url, array $scope): bool
+{
+    $p = parse_url($url);
+    if (!is_array($p) || !isset($p['scheme'], $p['host'])) {
+        return false;
+    }
+    if (!in_array(strtolower($p['scheme']), ['http', 'https'], true)) {
+        return false;
+    }
+    if (isset($p['port']) && $p['port'] !== 80 && $p['port'] !== 443) {
+        return false;
+    }
+    $h = normalizeHost($p['host']);
+    return $h !== false && in_array($h[0], $scope, true);
+}
+
+/** All A and AAAA records of a host, or false when it does not resolve. */
+function resolveHost(string $host): array|false
+{
+    if (array_key_exists($host, Net::$dnsCache)) {
+        return Net::$dnsCache[$host];
+    }
+
+    if (Net::$resolver !== null) {
+        $ips = (Net::$resolver)($host);
+    } elseif (function_exists('dns_get_record')) {
+        // Trailing dot: an absolute name, so the resolver's search domains are never tried
+        $records = @dns_get_record($host . '.', DNS_A | DNS_AAAA);
+        $ips     = $records === false ? false : [];
+        foreach ($records ?: [] as $r) {
+            if (($r['type'] ?? '') === 'A' && isset($r['ip'])) {
+                $ips[] = $r['ip'];
+            } elseif (($r['type'] ?? '') === 'AAAA' && isset($r['ipv6'])) {
+                $ips[] = $r['ipv6'];
+            }
+        }
+    } else {
+        $ips = @gethostbynamel($host); // IPv4 only; we pin to what we checked, so AAAA is never used
+    }
+
+    $ips = is_array($ips) && $ips ? array_values(array_unique($ips)) : false;
+    return Net::$dnsCache[$host] = $ips;
+}
+
+/** The address curl is pinned to: IPv4 first (shared hosting may lack IPv6 routes). */
+function pickAddress(array $ips): string
+{
+    foreach ($ips as $ip) {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            return $ip;
+        }
+    }
+    $packed = (string) inet_pton($ips[0]);
+    if (cidrMatch($packed, '::ffff:0:0/96')) {
+        return (string) inet_ntop(substr($packed, 12));
+    }
+    return (string) inet_ntop($packed);
+}
+
+/** Percent-encode bytes curl would otherwise send raw (controls, space, non-ASCII). */
+function encodeUrlPart(string $part): string
+{
+    return preg_replace_callback('/[^\x21-\x7e]/', fn(array $m) => rawurlencode($m[0]), $part) ?? '';
+}
+
+function refused(string $reason): array
+{
+    return ['ok' => false, 'error' => $reason];
+}
+
+/**
+ * Check one URL against the guard and resolve it.
+ *
+ * Returns ['ok' => true, url, origin, scheme, host, kind, port, ip] where url is rebuilt
+ * from the parsed parts (so curl parses exactly what we checked) and ip is the address
+ * to pin; or ['ok' => false, 'error' => reason]. Reasons: bad_url, bad_scheme,
+ * credentials, bad_host, bad_port, off_origin, dns_failed, private_address.
+ *
+ * @param list<string>|null $scope allowed hosts, or null for any public host
+ */
+function prepareRequest(string $url, ?array $scope): array
+{
+    if ($url === '' || strlen($url) > 2048 || preg_match('/[\x00-\x20\x7f\\\\]/', $url)) {
+        return refused('bad_url');
+    }
+    $p = parse_url($url);
+    if (!is_array($p) || !isset($p['scheme'])) {
+        return refused('bad_url');
+    }
+    $scheme = strtolower($p['scheme']);
+    if ($scheme !== 'http' && $scheme !== 'https') {
+        return refused('bad_scheme');
+    }
+    if (!isset($p['host']) || $p['host'] === '') {
+        return refused('bad_url');
+    }
+    if (isset($p['user']) || isset($p['pass'])) {
+        return refused('credentials');
+    }
+
+    $h = normalizeHost($p['host']);
+    if ($h === false) {
+        return refused('bad_host');
+    }
+    [$host, $kind] = $h;
+
+    $defaultPort = $scheme === 'https' ? 443 : 80;
+    $port        = $p['port'] ?? $defaultPort;
+    if ($port !== 80 && $port !== 443) {
+        return refused('bad_port');
+    }
+    if ($scope !== null && !in_array($host, $scope, true)) {
+        return refused('off_origin');
+    }
+
+    $ips = $kind === 'name' ? resolveHost($host) : [$host];
+    if (!$ips) {
+        return refused('dns_failed');
+    }
+    foreach ($ips as $ip) {
+        if (!isPublicIp($ip)) {
+            return refused('private_address');
+        }
+    }
+
+    $origin = $scheme . '://' . ($kind === 'ipv6' ? "[{$host}]" : $host)
+            . ($port !== $defaultPort ? ':' . $port : '');
+    $path   = encodeUrlPart($p['path'] ?? '') ?: '/';
+    $query  = isset($p['query']) ? '?' . encodeUrlPart($p['query']) : '';
+
+    return [
+        'ok'     => true,
+        'url'    => $origin . $path . $query,
+        'origin' => $origin,
+        'scheme' => $scheme,
+        'host'   => $host,
+        'kind'   => $kind,
+        'port'   => $port,
+        'ip'     => pickAddress($ips),
+    ];
+}
+
+/** Resolve a Location header against the URL that sent it (RFC 3986, section 5). */
+function resolveUrl(string $base, string $ref): string
+{
+    $ref = trim($ref);
+    if (($hash = strpos($ref, '#')) !== false) {
+        $ref = substr($ref, 0, $hash);
+    }
+    if ($ref === '') {
+        return $base;
+    }
+    if (preg_match('/^[a-z][a-z0-9+.-]*:/i', $ref)) {
+        return $ref; // absolute, any scheme: prepareRequest decides
+    }
+
+    $b         = parse_url($base);
+    $scheme    = $b['scheme'] ?? 'https';
+    $authority = ($b['host'] ?? '') . (isset($b['port']) ? ':' . $b['port'] : '');
+    if (str_starts_with($ref, '//')) {
+        return $scheme . ':' . $ref;
+    }
+
+    $basePath = $b['path'] ?? '/';
+    if ($ref[0] === '?') {
+        return $scheme . '://' . $authority . $basePath . $ref;
+    }
+
+    [$refPath, $refQuery] = explode('?', $ref, 2) + ['', null];
+    $path = $refPath[0] === '/' ? $refPath : preg_replace('#[^/]*$#', '', $basePath) . $refPath;
+
+    $out = [];
+    $segments = explode('/', $path);
+    foreach ($segments as $i => $seg) {
+        if ($seg === '.' || $seg === '..') {
+            if ($seg === '..' && count($out) > 1) {
+                array_pop($out);
+            }
+            if ($i === count($segments) - 1) {
+                $out[] = '';
+            }
+            continue;
+        }
+        $out[] = $seg;
+    }
+    $path = implode('/', $out);
+    if (!str_starts_with($path, '/')) {
+        $path = '/' . $path;
+    }
+
+    return $scheme . '://' . $authority . $path . ($refQuery !== null ? '?' . $refQuery : '');
+}
+
+// ─── Guarded HTTP fetch ───────────────────────────────────────────────────────
+
+/**
+ * One round of HTTP requests over curl_multi. Each request must come from prepareRequest().
+ * Redirects are not followed here; the Location header is returned instead.
+ *
+ * @return array<string|int,array{status:int,type:string,location:string,body:string,truncated:bool,error:string}>
+ */
+function curlExchange(array $requests): array
+{
+    $mh   = curl_multi_init();
+    $jobs = [];
+    $out  = [];
+
+    foreach ($requests as $key => $req) {
+        $state = (object) ['body' => '', 'truncated' => false, 'location' => ''];
+        $cap   = $req['cap'];
+        $addr  = str_contains($req['ip'], ':') ? '[' . $req['ip'] . ']' : $req['ip'];
+
+        $opts = [
+            CURLOPT_URL             => $req['url'],
+            CURLOPT_FOLLOWLOCATION  => false,
+            CURLOPT_PROTOCOLS       => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            // Pin the connection to the address we checked: no second DNS lookup, no rebinding
+            CURLOPT_CONNECT_TO      => ["::{$addr}:{$req['port']}"],
+            CURLOPT_PROXY           => '',
+            CURLOPT_CONNECTTIMEOUT  => min(CONNECT_TIMEOUT, $req['timeout']),
+            CURLOPT_TIMEOUT         => $req['timeout'],
+            CURLOPT_NOSIGNAL        => true,
+            CURLOPT_ENCODING        => '',
+            CURLOPT_USERAGENT       => LLMR_UA,
+            CURLOPT_HTTPHEADER      => ['Accept: ' . $req['accept']],
+            CURLOPT_HEADERFUNCTION  => function ($ch, string $line) use ($state): int {
+                if (preg_match('#^HTTP/\S+\s+\d{3}#i', $line)) {
+                    $state->location = ''; // a new response block (after 100 Continue)
+                } elseif (stripos($line, 'location:') === 0) {
+                    $state->location = trim(substr($line, 9));
+                }
+                return strlen($line);
+            },
+            // Size cap while streaming: keep up to $cap bytes, then abort the transfer
+            CURLOPT_WRITEFUNCTION   => function ($ch, string $chunk) use ($state, $cap): int {
+                $room = $cap - strlen($state->body);
+                if (strlen($chunk) <= $room) {
+                    $state->body .= $chunk;
+                    return strlen($chunk);
+                }
+                $state->body     .= substr($chunk, 0, max(0, $room));
+                $state->truncated = true;
+                return 0; // fewer bytes than received: curl stops with CURLE_WRITE_ERROR
+            },
+        ];
+        if ($req['kind'] === 'name') {
+            $opts[CURLOPT_RESOLVE] = ["{$req['host']}:{$req['port']}:{$addr}"];
+        }
+
+        $ch = curl_init();
+        if (!curl_setopt_array($ch, $opts)) {
+            curl_close($ch);
+            $out[$key] = ['status' => 0, 'type' => '', 'location' => '', 'body' => '', 'truncated' => false, 'error' => 'transport_setup'];
+            continue;
+        }
+        curl_multi_add_handle($mh, $ch);
+        $jobs[$key] = [$ch, $state, $req];
+    }
+
+    $results = [];
+    do {
+        $status = curl_multi_exec($mh, $active);
+        while ($info = curl_multi_info_read($mh)) {
+            $results[spl_object_id($info['handle'])] = $info['result'];
+        }
+        if ($active && curl_multi_select($mh, 1.0) === -1) {
+            usleep(10000);
+        }
+    } while ($active && $status === CURLM_OK);
+    while ($info = curl_multi_info_read($mh)) {
+        $results[spl_object_id($info['handle'])] = $info['result'];
+    }
+
+    foreach ($jobs as $key => [$ch, $state, $req]) {
+        $code    = $results[spl_object_id($ch)] ?? -1;
+        $primary = (string) curl_getinfo($ch, CURLINFO_PRIMARY_IP);
+
+        $error = '';
+        if ($code !== CURLE_OK && !($code === CURLE_WRITE_ERROR && $state->truncated)) {
+            $error = 'transport';
+        } elseif (@inet_pton($primary) !== @inet_pton($req['ip'])) {
+            $error = 'pin_mismatch'; // never expected; refuse rather than trust the body
+        }
+
+        $out[$key] = [
+            'status'    => (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE),
+            'type'      => (string) (curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?? ''),
+            'location'  => $state->location,
+            'body'      => $error === '' ? $state->body : '',
+            'truncated' => $state->truncated,
+            'error'     => $error,
+        ];
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+    }
+    curl_multi_close($mh);
+
+    return $out;
+}
+
+function fetchFailure(string $url, string $error, int $status = 0): array
+{
+    return ['ok' => false, 'status' => $status, 'type' => '', 'body' => '', 'url' => $url, 'truncated' => false, 'error' => $error];
+}
+
+/**
+ * Fetch URLs in parallel through the guard. Redirects (up to MAX_REDIRECTS) are followed
+ * by hand, and every hop is checked again: scheme, port, scope, DNS and address.
+ *
+ * @param array<string|int,string> $urls
+ * @param array{cap:int,timeout:int,accept:string,scope:?array} $opt
+ * @return array<string|int,array{ok:bool,status:int,type:string,body:string,url:string,truncated:bool,error:string}>
+ *         same keys as $urls; url is the final URL, ok means a 2xx body (possibly truncated)
+ */
+function fetchMany(array $urls, array $opt): array
+{
+    $transport = Net::$transport ?? curlExchange(...);
+    $results   = [];
+    $pending   = $urls;
+
+    for ($hop = 0; $pending; $hop++) {
+        $requests = [];
+        foreach ($pending as $key => $url) {
+            $req = prepareRequest($url, $opt['scope']);
+            if (!$req['ok']) {
+                $results[$key] = fetchFailure($url, $req['error']);
+                continue;
+            }
+            $requests[$key] = $req + ['cap' => $opt['cap'], 'timeout' => $opt['timeout'], 'accept' => $opt['accept']];
+        }
+
+        $pending   = [];
+        $responses = $requests ? $transport($requests) : [];
+
+        foreach ($requests as $key => $req) {
+            $r      = $responses[$key] ?? ['status' => 0, 'error' => 'transport'];
+            $status = (int) ($r['status'] ?? 0);
+            $error  = (string) ($r['error'] ?? '');
+
+            if ($error === '' && in_array($status, [301, 302, 303, 307, 308], true) && ($r['location'] ?? '') !== '') {
+                if ($hop >= MAX_REDIRECTS) {
+                    $results[$key] = fetchFailure($req['url'], 'too_many_redirects', $status);
+                } else {
+                    $pending[$key] = resolveUrl($req['url'], (string) $r['location']);
+                }
+                continue;
+            }
+
+            $results[$key] = [
+                'ok'        => $error === '' && $status >= 200 && $status < 300,
+                'status'    => $status,
+                'type'      => (string) ($r['type'] ?? ''),
+                'body'      => $error === '' ? (string) ($r['body'] ?? '') : '',
+                'url'       => $req['url'],
+                'truncated' => (bool) ($r['truncated'] ?? false),
+                'error'     => $error,
+            ];
+        }
+    }
+
+    $ordered = [];
+    foreach ($urls as $key => $_) {
+        $ordered[$key] = $results[$key];
+    }
+    return $ordered;
+}
+
+function guardedFetch(string $url, int $cap, int $timeout, ?array $scope, string $accept): array
+{
+    return fetchMany(['url' => $url], ['cap' => $cap, 'timeout' => $timeout, 'accept' => $accept, 'scope' => $scope])['url'];
+}
+
+function fetchText(string $url, int $cap, int $timeout, ?array $scope, string $accept): string|false
+{
+    $r = guardedFetch($url, $cap, $timeout, $scope, $accept);
+    return $r['ok'] ? $r['body'] : false;
 }
 
 // ─── Sitemap discovery ────────────────────────────────────────────────────────
 
-function discoverSitemap(string $origin): string|false
+function discoverSitemap(string $origin, array $scope): string|false
 {
     $candidates = [
         $origin . '/sitemap.xml',
@@ -101,17 +620,18 @@ function discoverSitemap(string $origin): string|false
         $origin . '/sitemap/sitemap.xml',
     ];
     foreach ($candidates as $candidate) {
-        $body = fetchText($candidate, 8);
+        $body = fetchText($candidate, CAP_SITEMAP, 8, $scope, ACCEPT_XML);
         if ($body !== false && str_contains($body, '<loc>')) {
             return $candidate;
         }
     }
-    // Parse robots.txt for Sitemap: directive
-    $robots = fetchText($origin . '/robots.txt', 5);
-    if ($robots !== false && preg_match('/^Sitemap:\s*(.+)$/im', $robots, $m)) {
-        $found = trim($m[1]);
-        if (isSafeUrl($found)) {
-            return $found;
+    // Parse robots.txt for Sitemap: directives, keeping the first one on this site
+    $robots = fetchText($origin . '/robots.txt', CAP_TEXT, 5, $scope, ACCEPT_TEXT);
+    if ($robots !== false && preg_match_all('/^\s*Sitemap:\s*(\S+)/im', $robots, $m)) {
+        foreach ($m[1] as $found) {
+            if (inScope($found, $scope)) {
+                return $found;
+            }
         }
     }
     return false;
@@ -123,133 +643,196 @@ function extractLocsFromXml(string $xml): array
 {
     // Works for both sitemap_index and urlset formats
     preg_match_all('|<loc>\s*(https?://[^<\s]+)\s*</loc>|', $xml, $m);
-    return array_map('trim', $m[1] ?? []);
+    return array_map(fn(string $loc) => html_entity_decode(trim($loc), ENT_QUOTES | ENT_XML1, 'UTF-8'), $m[1] ?? []);
 }
 
-function getUrlsFromSitemap(string $sitemapUrl): array
+/**
+ * Page URLs listed in a sitemap (or in the first child of a sitemap index) that are on
+ * this site. Reads at most MAX_LOCS entries and does no DNS lookup per entry.
+ *
+ * @return array{0: list<string>, 1: bool} [urls, capped]
+ */
+function getUrlsFromSitemap(string $sitemapUrl, array $scope): array
 {
-    $xml = fetchText($sitemapUrl, 10);
-    if ($xml === false) {
-        return [];
+    $r = guardedFetch($sitemapUrl, CAP_SITEMAP, 10, $scope, ACCEPT_XML);
+    if (!$r['ok']) {
+        return [[], false];
     }
+    $xml  = $r['body'];
     $locs = extractLocsFromXml($xml);
     if (!$locs) {
-        return [];
+        return [[], false];
     }
 
     // Sitemap index: all locs point to child sitemaps (end in .xml)
     // Detect via root element or by checking if locs look like sitemaps
     $isSitemapIndex = str_contains($xml, '<sitemapindex') || str_contains($xml, '<sitemap>');
     if ($isSitemapIndex) {
-        // Fetch the first child sitemap and get page URLs from it
-        $childUrl = $locs[0] ?? '';
-        if (!$childUrl || !isSafeUrl($childUrl)) {
-            return [];
+        // Fetch the first child sitemap on this site and get page URLs from it
+        $childUrl = '';
+        foreach (array_slice($locs, 0, MAX_LOCS) as $loc) {
+            if (inScope($loc, $scope)) {
+                $childUrl = $loc;
+                break;
+            }
         }
-        $childXml = fetchText($childUrl, 10);
-        if ($childXml === false) {
-            return [];
+        if ($childUrl === '') {
+            return [[], false];
         }
-        return extractLocsFromXml($childXml);
+        $r = guardedFetch($childUrl, CAP_SITEMAP, 10, $scope, ACCEPT_XML);
+        if (!$r['ok']) {
+            return [[], false];
+        }
+        $locs = extractLocsFromXml($r['body']);
     }
 
-    return $locs;
+    $capped = count($locs) > MAX_LOCS || $r['truncated'];
+    $urls   = array_filter(array_slice($locs, 0, MAX_LOCS), fn(string $u) => inScope($u, $scope));
+    return [array_values(array_unique($urls)), $capped];
 }
 
 // ─── IP rate limiting ─────────────────────────────────────────────────────────
 
-function checkRateLimit(string $ip, string $logFile): array
+function ensureDataDir(string $dir): void
 {
-    $dir = dirname($logFile);
     if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
+        @mkdir($dir, 0755, true);
     }
     // Ensure .htaccess blocks direct HTTP access to data/
     $htaccess = $dir . '/.htaccess';
     if (!file_exists($htaccess)) {
-        file_put_contents($htaccess, "Order deny,allow\nDeny from all\n");
+        @file_put_contents($htaccess, "Order deny,allow\nDeny from all\n");
+    }
+}
+
+/** Rate-limit key: the client IPv4, or the /64 an IPv6 client sits in. */
+function rateKey(string $ip): string
+{
+    $packed = @inet_pton($ip);
+    if ($packed === false || strlen($packed) !== 16) {
+        return $ip;
+    }
+    if (cidrMatch($packed, '::ffff:0:0/96')) {
+        return (string) inet_ntop(substr($packed, 12));
+    }
+    return inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
+}
+
+/**
+ * Sliding-window limit: at most $max hits per $key in $window seconds, stored as
+ * { key: [timestamps] } in $logFile. Read, check and write happen under one flock.
+ * With $record false it only checks. Returns null when the log cannot be used.
+ *
+ * @return array{limited: bool, next?: string}|null
+ */
+function rateLimit(string $logFile, string $key, int $window, int $max, bool $record): ?array
+{
+    ensureDataDir(dirname($logFile));
+    $fh = @fopen($logFile, 'c+');
+    if ($fh === false) {
+        error_log("generate.php: cannot open rate-limit log {$logFile}");
+        return null;
+    }
+    if (!flock($fh, LOCK_EX)) {
+        fclose($fh);
+        error_log("generate.php: cannot lock rate-limit log {$logFile}");
+        return null;
     }
 
-    $data = [];
-    if (file_exists($logFile)) {
-        $data = json_decode((string) file_get_contents($logFile), true) ?? [];
-    }
+    $data = json_decode((string) stream_get_contents($fh), true);
+    $data = is_array($data) ? $data : [];
+    $now  = time();
 
-    $now = time();
-
-    // Remove entries older than 48 hours
-    $data = array_filter($data, fn($ts) => ($now - (int) $ts) < 172800);
-
-    if (isset($data[$ip])) {
-        $nextAvail = (int) $data[$ip] + 86400;
-        if ($now < $nextAvail) {
-            return ['limited' => true, 'next' => date('c', $nextAvail)];
+    // Keep only hits inside the window (older logs stored one timestamp per key)
+    foreach ($data as $k => $hits) {
+        $hits = array_values(array_filter(array_map('intval', (array) $hits), fn(int $t) => $now - $t < $window));
+        if ($hits) {
+            $data[$k] = $hits;
+        } else {
+            unset($data[$k]);
         }
     }
 
-    $data[$ip] = $now;
-    file_put_contents($logFile, json_encode($data), LOCK_EX);
+    $hits    = $data[$key] ?? [];
+    $limited = count($hits) >= $max;
+    if ($record) {
+        if (!$limited) {
+            $hits[]     = $now;
+            $data[$key] = $hits;
+        }
+        ftruncate($fh, 0);
+        rewind($fh);
+        fwrite($fh, (string) json_encode($data));
+        fflush($fh);
+    }
+    flock($fh, LOCK_UN);
+    fclose($fh);
+
+    if ($limited) {
+        sort($hits);
+        return ['limited' => true, 'next' => date('c', $hits[count($hits) - $max] + $window)];
+    }
     return ['limited' => false];
 }
 
 // ─── Parallel page fetch ──────────────────────────────────────────────────────
 
-function fetchPagesParallel(array $urls, int $timeout = 8, int $maxBytes = 524288): array
+/** @return array<string, array{html:string,type:string}> keyed by final URL */
+function fetchPagesParallel(array $urls, array $scope, int $timeout = 8): array
 {
-    $mh      = curl_multi_init();
-    $handles = [];
-
-    foreach ($urls as $i => $url) {
-        if (!isSafeUrl($url)) {
-            continue;
+    $opt   = ['cap' => CAP_PAGE, 'timeout' => $timeout, 'accept' => ACCEPT_HTML, 'scope' => $scope];
+    $pages = [];
+    foreach (fetchMany($urls, $opt) as $r) {
+        if ($r['ok'] && $r['status'] === 200 && str_contains(strtolower($r['type']), 'html') && !isset($pages[$r['url']])) {
+            $pages[$r['url']] = ['html' => $r['body'], 'type' => $r['type']];
         }
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 3,
-            CURLOPT_TIMEOUT        => $timeout,
-            CURLOPT_USERAGENT      => 'LLMRBot/2.0 (+https://open-llmr.org)',
-            CURLOPT_HTTPHEADER     => ['Accept: text/html,application/xhtml+xml'],
-        ]);
-        curl_multi_add_handle($mh, $ch);
-        $handles[] = ['ch' => $ch, 'url' => $url];
     }
+    return $pages;
+}
 
-    do {
-        $status = curl_multi_exec($mh, $active);
-        if ($active) {
-            curl_multi_select($mh);
-        }
-    } while ($active && $status === CURLM_OK);
-
-    $results = [];
-    foreach ($handles as $item) {
-        $ch          = $item['ch'];
-        $url         = $item['url'];
-        $httpCode    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $contentType = (string) (curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?? '');
-        $body        = (string) (curl_multi_getcontent($ch) ?? '');
-
-        if ($httpCode === 200 && str_contains($contentType, 'html')) {
-            $results[$url] = substr($body, 0, $maxBytes);
-        }
-
-        curl_multi_remove_handle($mh, $ch);
-        curl_close($ch);
+/** True when the response is a served llms.txt: 200 and not an HTML page (soft 404s are HTML). */
+function servesLlmsTxt(array $r): bool
+{
+    if (!$r['ok'] || $r['status'] !== 200 || str_contains(strtolower($r['type']), 'html')) {
+        return false;
     }
-
-    curl_multi_close($mh);
-    return $results;
+    $text = ltrim(preg_replace('/^\xEF\xBB\xBF/', '', $r['body']) ?? '');
+    return $text !== '' && $text[0] !== '<';
 }
 
 // ─── Metadata extraction ──────────────────────────────────────────────────────
 
-function extractMeta(string $html, string $url): array
+/** Decode a page to valid UTF-8, using the charset from the Content-Type header or a <meta> tag. */
+function htmlToUtf8(string $html, string $contentType = ''): string
 {
+    $charset = '';
+    if (preg_match('/charset\s*=\s*["\']?([\w.:-]+)/i', $contentType, $m)) {
+        $charset = $m[1];
+    } elseif (preg_match('/<meta[^>]+charset\s*=\s*["\']?([\w.:-]+)/i', substr($html, 0, 4096), $m)) {
+        $charset = $m[1];
+    }
+    if ($charset !== '' && !in_array(strtolower($charset), ['utf-8', 'utf8'], true)) {
+        try {
+            $converted = mb_convert_encoding($html, 'UTF-8', $charset);
+            if (is_string($converted)) {
+                $html = $converted;
+            }
+        } catch (ValueError) {
+            // Unknown charset: treat the bytes as UTF-8 below
+        }
+    }
+    return mb_scrub($html, 'UTF-8');
+}
+
+function extractMeta(string $html, string $url, string $contentType = ''): array
+{
+    // Non-ASCII characters become numeric entities, so libxml reads the text correctly
+    // whatever charset it guesses (replaces the 'HTML-ENTITIES' conversion, deprecated in PHP 8.2)
+    $ascii = mb_encode_numericentity(htmlToUtf8($html, $contentType), [0x80, 0x10FFFF, 0, 0x1FFFFF], 'UTF-8');
+
     $dom = new DOMDocument();
     libxml_use_internal_errors(true);
-    $dom->loadHTML(mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8'));
+    $dom->loadHTML($ascii !== '' ? $ascii : '<html></html>');
     libxml_clear_errors();
 
     $xpath = new DOMXPath($dom);
@@ -341,7 +924,7 @@ function mistralSummary(array $meta, string $key, string $model, string $endpoin
         'messages'    => [['role' => 'user', 'content' => $prompt]],
         'temperature' => 0.2,
         'max_tokens'  => 60,
-    ]);
+    ], JSON_INVALID_UTF8_SUBSTITUTE);
 
     $ch = curl_init($endpoint);
     curl_setopt_array($ch, [
@@ -396,7 +979,7 @@ function buildPage(array $meta, string $pageUrl, string $summary): array
         $page['d'] = $meta['date'];
     }
     if ($summary !== '') {
-        $page['sum'] = $summary;
+        $page['sum'] = mb_substr($summary, 0, 300);
     }
     if ($meta['tags']) {
         $page['kw'] = $meta['tags'];
@@ -423,86 +1006,150 @@ function buildPage(array $meta, string $pageUrl, string $summary): array
     return $page;
 }
 
+// ─── Response helper ──────────────────────────────────────────────────────────
+
+function respond(array $payload, int $status = 200, int $flags = 0): never
+{
+    http_response_code($status);
+    echo json_encode($payload, $flags | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-$body       = json_decode((string) file_get_contents('php://input'), true) ?? [];
-$inputUrl   = trim((string) ($body['url'] ?? ''));
-$sitemapUrl = trim((string) ($body['sitemap_url'] ?? ''));
+if (defined('LLMR_GENERATE_LIB')) {
+    return; // loaded by the test harness: functions only
+}
+
+set_time_limit(120);
+
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    respond(['error' => 'method_not_allowed'], 405);
+}
+
+loadEnv(__DIR__ . '/../.env');
+
+$MISTRAL_KEY      = $_ENV['MISTRAL_API_KEY']  ?? '';
+$MISTRAL_MODEL    = $_ENV['MISTRAL_MODEL']    ?? 'mistral-small-latest';
+$MISTRAL_ENDPOINT = $_ENV['MISTRAL_ENDPOINT'] ?? 'https://api.mistral.ai/v1/chat/completions';
+$MISTRAL_TIMEOUT  = (int) ($_ENV['MISTRAL_TIMEOUT'] ?? 20);
+
+$body       = json_decode((string) file_get_contents('php://input'), true);
+$body       = is_array($body) ? $body : [];
+$inputUrl   = trim(is_string($body['url'] ?? null) ? $body['url'] : '');
+$sitemapUrl = trim(is_string($body['sitemap_url'] ?? null) ? $body['sitemap_url'] : '');
 
 if ($inputUrl === '' || !filter_var($inputUrl, FILTER_VALIDATE_URL)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'invalid_url']);
-    exit;
-}
-if (!isSafeUrl($inputUrl)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'unsafe_url']);
-    exit;
+    respond(['error' => 'invalid_url'], 400);
 }
 
-$scheme = strtolower((string) parse_url($inputUrl, PHP_URL_SCHEME));
-$host   = (string) parse_url($inputUrl, PHP_URL_HOST);
-$origin = $scheme . '://' . $host;
+$clientKey = rateKey($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+$dataDir   = __DIR__ . '/../data';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MODE A — Discovery only (no sitemap_url provided)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if ($sitemapUrl === '') {
-    $discovered = discoverSitemap($origin);
-    if ($discovered === false) {
-        echo json_encode(['error' => 'sitemap_not_found']);
-        exit;
+    // ─── Own limit, counted before any DNS lookup or fetch ──────────────────────
+    $rate = rateLimit($dataDir . '/discovery_log.json', $clientKey, DISCOVERY_WINDOW, DISCOVERY_LIMIT, true);
+    if ($rate === null) {
+        respond(['error' => 'rate_limit_unavailable'], 503);
     }
-    $urls  = getUrlsFromSitemap($discovered);
-    $urls  = array_values(array_unique(array_filter($urls, 'isSafeUrl')));
-    echo json_encode(['sitemap_url' => $discovered, 'pages_found' => count($urls)]);
-    exit;
+    if ($rate['limited']) {
+        respond(['error' => 'discovery_rate_limited', 'next_available' => $rate['next']], 429);
+    }
+
+    $target = prepareRequest($inputUrl, null);
+    if (!$target['ok']) {
+        respond(['error' => 'refused_url', 'field' => 'url', 'reason' => $target['error']], 400);
+    }
+    $scope = scopeHosts($target['host']);
+
+    $discovered = discoverSitemap($target['origin'], $scope);
+    if ($discovered === false) {
+        respond(['error' => 'sitemap_not_found']);
+    }
+    [$urls, $capped] = getUrlsFromSitemap($discovered, $scope);
+
+    $response = ['sitemap_url' => $discovered, 'pages_found' => count($urls)];
+    if ($capped) {
+        $response['pages_capped'] = true;
+    }
+    respond($response);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MODE B — Full processing (sitemap_url provided)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ─── IP rate limit — 1 generation per IP per 24 h ────────────────────────────
-$ip      = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-$logFile = __DIR__ . '/../data/ip_log.json';
-$rate    = checkRateLimit($ip, $logFile);
-if ($rate['limited']) {
-    echo json_encode(['error' => 'rate_limited', 'next_available' => $rate['next']]);
-    exit;
+if (!filter_var($sitemapUrl, FILTER_VALIDATE_URL)) {
+    respond(['error' => 'invalid_sitemap_url'], 400);
 }
 
-// Validate user-supplied sitemap URL
-if (!filter_var($sitemapUrl, FILTER_VALIDATE_URL) || !isSafeUrl($sitemapUrl)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'invalid_sitemap_url']);
-    exit;
+// ─── IP rate limit: 1 generation per IP per 24 h ─────────────────────────────
+// Check first without recording, so a client that is already limited costs no DNS lookup
+$logFile = $dataDir . '/ip_log.json';
+$rate    = rateLimit($logFile, $clientKey, GENERATION_WINDOW, GENERATION_LIMIT, false);
+if ($rate === null) {
+    respond(['error' => 'rate_limit_unavailable'], 503);
+}
+if ($rate['limited']) {
+    respond(['error' => 'rate_limited', 'next_available' => $rate['next']], 429);
+}
+
+// Validate all input before the generation is recorded
+$target = prepareRequest($inputUrl, null);
+if (!$target['ok']) {
+    respond(['error' => 'refused_url', 'field' => 'url', 'reason' => $target['error']], 400);
+}
+$scope   = scopeHosts($target['host']);
+$sitemap = prepareRequest($sitemapUrl, $scope);
+if (!$sitemap['ok']) {
+    respond(['error' => 'refused_url', 'field' => 'sitemap_url', 'reason' => $sitemap['error']], 400);
+}
+
+// Record the generation; the check runs again under the lock, so parallel requests can't both pass
+$rate = rateLimit($logFile, $clientKey, GENERATION_WINDOW, GENERATION_LIMIT, true);
+if ($rate === null) {
+    respond(['error' => 'rate_limit_unavailable'], 503);
+}
+if ($rate['limited']) {
+    respond(['error' => 'rate_limited', 'next_available' => $rate['next']], 429);
 }
 
 // Get URLs
-$allUrls  = getUrlsFromSitemap($sitemapUrl);
-$allUrls  = array_values(array_unique(array_filter($allUrls, 'isSafeUrl')));
+[$allUrls] = getUrlsFromSitemap($sitemapUrl, $scope);
 if (!$allUrls) {
-    echo json_encode(['error' => 'sitemap_empty']);
-    exit;
+    respond(['error' => 'sitemap_empty']);
 }
 
-$wasCapped = count($allUrls) > 25;
+$wasCapped = count($allUrls) > MAX_PAGES;
 if ($wasCapped) {
     shuffle($allUrls);
 }
-$urls = array_slice($allUrls, 0, 25);
+$urls = array_slice($allUrls, 0, MAX_PAGES);
 
 // Parallel fetch
-$htmlByUrl = fetchPagesParallel($urls);
+$htmlByUrl = fetchPagesParallel($urls, $scope);
 if (!$htmlByUrl) {
-    echo json_encode(['error' => 'fetch_failed']);
-    exit;
+    respond(['error' => 'fetch_failed']);
 }
+
+// Companion llms.txt (LLMR v2.1 pairing): link it from s.llms_txt when the site serves one
+$llmsTxtUrl = $target['origin'] . '/llms.txt';
+$hasLlmsTxt = servesLlmsTxt(guardedFetch($llmsTxtUrl, CAP_TEXT, 5, $scope, ACCEPT_TEXT));
 
 // Extract metadata
 $pagesData = [];
-foreach ($htmlByUrl as $pageUrl => $html) {
-    $pagesData[] = ['url' => $pageUrl, 'meta' => extractMeta($html, $pageUrl), 'summary' => ''];
+foreach ($htmlByUrl as $pageUrl => $page) {
+    $pagesData[] = ['url' => $pageUrl, 'meta' => extractMeta($page['html'], $pageUrl, $page['type']), 'summary' => ''];
 }
 
 // Mistral summaries — sequential with 300ms delay
@@ -544,13 +1191,16 @@ foreach ($pagesData as $item) {
 }
 
 // Build LLMR structure
-$site = ['d' => $host];
+$site = ['d' => $target['host']];
 if ($siteAuthor !== '') {
     $site['a'] = ['n' => $siteAuthor, 'r' => ''];
 }
+if ($hasLlmsTxt) {
+    $site['llms_txt'] = $llmsTxtUrl;
+}
 
 $llmr = [
-    'v'  => '2.0',
+    'v'  => LLMR_VERSION,
     'ts' => time(),
     's'  => $site,
     'p'  => $pages,
@@ -559,7 +1209,7 @@ $llmr = [
 // Stats
 $pageCount    = count($pages);
 $estHtmlBytes = $pageCount * 27500;
-$llmrBytes    = strlen(json_encode($llmr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+$llmrBytes    = strlen((string) json_encode($llmr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
 $reductionPct = $estHtmlBytes > 0 ? round((1 - $llmrBytes / $estHtmlBytes) * 100, 1) : 0;
 
 $stats = [
@@ -579,4 +1229,4 @@ if ($mistralIssueCount > 0) {
     $response['warning_mistral'] = "Mistral had issues on {$mistralIssueCount} page(s): {$lastMistralWarn}";
 }
 
-echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+respond($response, 200, JSON_PRETTY_PRINT);

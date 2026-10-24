@@ -13,3 +13,6 @@ Thumbs.db
 .env.bak
 CLAUDE.md
 .claude/
+
+# Generator runtime log (created on the server)
+data/discovery_log.json
