@@ -23,7 +23,8 @@
       "description": "LLMR is an open-source JSON site index format that gives AI systems your entire website in one fetch, reducing token consumption by up to 98.3% compared to raw HTML.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Any",
-      "softwareVersion": "2.0",
+      "softwareVersion": "2.1",
+      "dateModified": "2026-10-24",
       "license": "https://opensource.org/licenses/MIT",
       "codeRepository": "https://gitlab.com/open-llmr",
       "programmingLanguage": ["Python", "TypeScript", "PHP"],
@@ -34,7 +35,7 @@
         "Single HTTP request for full site understanding",
         "Auto-generated from existing HTML",
         "Python, npm, and WordPress packages",
-        "Compatible with llms.txt"
+        "Pairs with llms.txt: each file links to the other"
       ]
     }
     </script>
@@ -97,7 +98,7 @@
 
 <!-- HERO -->
 <div class="hero">
-    <div class="badge">Open Source &bull; MIT License &bull; v2.0</div>
+    <div class="badge">Open Source &bull; MIT License &bull; v2.1</div>
 
     <h1>LLMR: One file.<br><span class="accent">Fewer tokens.</span></h1>
 
@@ -141,10 +142,11 @@
             <span>~1,600 tokens for 21 blog posts</span>
         </div>
         <div class="code-body">{
-  <span class="key">"v"</span>: <span class="str">"2.0"</span>,
+  <span class="key">"v"</span>: <span class="str">"2.1"</span>,
   <span class="key">"s"</span>: {
     <span class="key">"d"</span>: <span class="str">"raphaelreck.com"</span>,
-    <span class="key">"a"</span>: { <span class="key">"n"</span>: <span class="str">"Raphaël Reck"</span>, <span class="key">"r"</span>: <span class="str">"IT_sys_sw_consultant"</span> }
+    <span class="key">"a"</span>: { <span class="key">"n"</span>: <span class="str">"Raphaël Reck"</span>, <span class="key">"r"</span>: <span class="str">"IT_sys_sw_consultant"</span> },
+    <span class="key">"llms_txt"</span>: <span class="str">"/llms.txt"</span>
   },
   <span class="key">"p"</span>: [
     {
@@ -196,59 +198,76 @@
     </p>
 </section>
 
-<!-- COMPARISON -->
+<!-- LLMS.TXT PAIRING -->
 <section>
-    <h2><span class="num" aria-hidden="true">03</span> How it compares</h2>
-    <p class="section-sub">LLMR complements <a href="https://llmstxt.org/">llms.txt</a>. Serve both.</p>
+    <h2><span class="num" aria-hidden="true">03</span> Two files, two jobs</h2>
+    <p class="section-sub"><a href="https://llmstxt.org/">llms.txt</a> is the curated front door, llmr.json the complete index. Serve both: each one links to the other.</p>
 
-    <table class="compare-table" aria-label="Comparison of LLMR vs Raw HTML vs llms.txt">
-        <caption class="visually-hidden">Token and request comparison: LLMR vs Raw HTML vs llms.txt for a 21-page site</caption>
+    <table class="compare-table">
+        <caption class="visually-hidden">How llms.txt and llmr.json split the work, and how each file links to the other</caption>
         <thead>
             <tr>
-                <th scope="col">Feature</th>
-                <th scope="col">Raw HTML</th>
+                <th scope="col"><span class="visually-hidden">Aspect</span></th>
                 <th scope="col">llms.txt</th>
-                <th scope="col">LLMR</th>
+                <th scope="col">llmr.json</th>
             </tr>
         </thead>
         <tbody>
             <tr>
-                <td>Tokens (21 pages)</td>
-                <td class="lose">~158,000</td>
-                <td class="lose">~200 + N fetches</td>
-                <td class="win">~1,665</td>
+                <th scope="row">Role</th>
+                <td>Curated front door</td>
+                <td>Complete structured index</td>
             </tr>
             <tr>
-                <td>HTTP requests</td>
-                <td class="lose">21</td>
-                <td class="lose">1 + N</td>
-                <td class="win">1</td>
+                <th scope="row">Format</th>
+                <td>Markdown</td>
+                <td>JSON with compressed keys</td>
             </tr>
             <tr>
-                <td>Metadata</td>
-                <td class="lose">Parse HTML</td>
-                <td class="lose">None</td>
-                <td class="win">Structured</td>
+                <th scope="row">Lists</th>
+                <td>The pages worth reading first</td>
+                <td>Every page</td>
             </tr>
             <tr>
-                <td>Embeddings</td>
-                <td class="lose">No</td>
-                <td class="lose">No</td>
-                <td class="win">Optional</td>
+                <th scope="row">Per page</th>
+                <td>Title, link, one-line note</td>
+                <td>Type, date, summary, keywords, read time</td>
             </tr>
             <tr>
-                <td>Auto-generated</td>
-                <td>-</td>
-                <td class="lose">Manual</td>
-                <td class="win">Yes</td>
+                <th scope="row">Agents use it to</th>
+                <td>Get their bearings</td>
+                <td>Search and filter by type, date or topic</td>
             </tr>
             <tr>
-                <td>Works together</td>
-                <td>-</td>
-                <td colspan="2" class="win text-center">&#10003; llms_txt field links them</td>
+                <th scope="row">Links to the other</th>
+                <td class="win"><code class="code-inline">##&nbsp;Optional</code> &rarr; llmr.json</td>
+                <td class="win"><code class="code-inline">s.llms_txt</code> &rarr; llms.txt</td>
             </tr>
         </tbody>
     </table>
+
+    <div class="code-block">
+        <div class="code-header">
+            <span>llms.txt</span>
+            <span>hand-written, abridged</span>
+        </div>
+        <pre class="code-body"><span class="key"># LLMR</span>
+
+<span class="dim">&gt; LLMR (LLM-Readable) is an open JSON site index format. [...]</span>
+
+<span class="key">## Docs</span>
+- [<span class="str">LLMR v2.1 specification</span>](https://gitlab.com/open-llmr/spec/-/raw/main/SPEC.md)<span class="dim">: [...]</span>
+
+<span class="key">## Optional</span>
+- [<span class="str">LLMR site index</span>](https://open-llmr.org/llmr.json)<span class="dim">: every page as structured JSON [...]</span></pre>
+    </div>
+
+    <p class="section-note">
+        <strong>Agent flow:</strong> read <code class="code-inline">llms.txt</code> to get its bearings &rarr;
+        query <code class="code-inline">llmr.json</code> when the curated list is not enough &rarr;
+        fetch only the pages it picked.<br>
+        See ours: <a href="/llms.txt">/llms.txt</a> &middot; <a href="/llmr.json">/llmr.json</a>
+    </p>
 </section>
 
 <!-- INSTALL -->
@@ -324,7 +343,7 @@
         <a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md">Spec</a> &bull;
         MIT License
     </p>
-    <p class="footer-note">LLMR complements <a href="https://llmstxt.org/">llms.txt</a>. Serve both.</p>
+    <p class="footer-note">LLMR pairs with <a href="https://llmstxt.org/">llms.txt</a>. We serve both: <a href="/llms.txt">/llms.txt</a> &middot; <a href="/llmr.json">/llmr.json</a></p>
 </footer>
 
 <script src="public/script/theme.js"></script>

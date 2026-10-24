@@ -1,0 +1,19 @@
+# LLMR
+
+> LLMR (LLM-Readable) is an open JSON site index format. One llmr.json lists every page of a site with its type, date, summary and keywords, so an AI agent can understand the whole site in one fetch. It pairs with llms.txt: this file is the curated front door, llmr.json the complete index, and each one links to the other.
+
+Start with the Docs below. To see every page of this site with its type, date and summary, fetch the llmr.json linked under Optional. The Docs links point to raw files on GitLab.
+
+## Docs
+- [LLMR v2.1 specification](https://gitlab.com/open-llmr/spec/-/raw/main/SPEC.md): the format, its compressed keys, and how llmr.json and llms.txt link to each other
+- [llmr-generator for Python](https://gitlab.com/open-llmr/python/-/raw/main/README.md): CLI that builds llmr.json from HTML files and writes or reads llms.txt
+
+## Site
+- [LLMR home](https://open-llmr.org/): what LLMR is, the benchmark measured on raphaelreck.com (21 pages in 1 request, 98.3% smaller than the raw HTML), and how llmr.json pairs with llms.txt
+- [Online generator](https://open-llmr.org/generate.html): paste the URL of a site that has a sitemap.xml and get an llmr.json for up to 25 pages
+- [About LLMR](https://open-llmr.org/about.html): the story behind LLMR and who builds it
+
+## Optional
+- [LLMR site index](https://open-llmr.org/llmr.json): every page as structured JSON (type, date, summary, keywords)
+- [LLMR JSON Schema](https://gitlab.com/open-llmr/spec/-/raw/main/llmr-v2.schema.json): validates llmr.json files, v2.0 and v2.1
+- [llms.txt specification](https://llmstxt.org/index.md): the llms.txt format this file follows

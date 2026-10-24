@@ -1,0 +1,103 @@
+{
+  "v": "2.1",
+  "ts": 1792859708,
+  "s": {
+    "d": "open-llmr.org",
+    "ti": "LLMR: RSS for the AI Era",
+    "desc": "One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.",
+    "a": {
+      "n": "Raphaël Reck"
+    },
+    "llms_txt": "https://open-llmr.org/llms.txt",
+    "ct": {
+      "SoftwareApplication": 1,
+      "AboutPage": 1,
+      "WebApplication": 1
+    }
+  },
+  "p": [
+    {
+      "id": "index",
+      "u": "/",
+      "t": "SoftwareApplication",
+      "ti": "LLMR: RSS for the AI Era",
+      "d": "2026-10-24",
+      "sum": "One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.",
+      "kw": [
+        "llmr",
+        "llms.txt",
+        "AI indexing",
+        "LLM tokens",
+        "site index",
+        "RSS for AI",
+        "open source",
+        "token reduction",
+        "machine readable web"
+      ],
+      "wc": 130,
+      "rt": 1,
+      "tc": 1,
+      "cb": 6,
+      "sd": 1,
+      "h1": "LLMR: One file.",
+      "a": "Raphaël Reck"
+    },
+    {
+      "id": "about",
+      "u": "/about.html",
+      "t": "AboutPage",
+      "ti": "About LLMR: Built by Raphaël Reck",
+      "d": "2026-10-24",
+      "sum": "LLMR was built by Raphaël Reck, an IT Systems & Software Consultant with 20+ years of experience.",
+      "kw": [
+        "llmr",
+        "about llmr",
+        "Raphaël Reck",
+        "RSS for AI",
+        "AI agents",
+        "token usage",
+        "site index",
+        "benchmark",
+        "Roots Time Corporation"
+      ],
+      "wc": 85,
+      "rt": 1,
+      "tc": 1,
+      "sd": 1,
+      "h1": "RSS worked. Why not for AI?",
+      "a": "Raphaël Reck"
+    },
+    {
+      "id": "generate",
+      "u": "/generate.html",
+      "t": "WebApplication",
+      "ti": "LLMR Generator: Try it live",
+      "d": "2026-10-24",
+      "sum": "Paste any URL and get a ready-to-deploy llmr.json in seconds. Free, open source.",
+      "kw": [
+        "llmr",
+        "llmr.json",
+        "llmr generator",
+        "online generator",
+        "sitemap.xml",
+        "AI summaries",
+        "site index",
+        "AI indexing",
+        "open source"
+      ],
+      "wc": 43,
+      "rt": 1,
+      "tc": 1,
+      "cb": 7,
+      "sd": 1,
+      "h1": "Try the",
+      "a": "Raphaël Reck"
+    }
+  ],
+  "stats": {
+    "total_pages": 3,
+    "total_words": 258,
+    "avg_read_time": 1.0,
+    "pages_with_code": 2
+  }
+}
