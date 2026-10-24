@@ -181,7 +181,7 @@ function _populateResult(data) {
     const bytes = stats.llmr_bytes ?? new TextEncoder().encode(lastJson).length;
 
     document.getElementById('sPages').textContent = pages;
-    document.getElementById('sRed').innerHTML     = red + '<span class="stat-unit">%</span>';
+    document.getElementById('sRed').innerHTML     = Number(red) + '<span class="stat-unit">%</span>';
     document.getElementById('sSize').innerHTML    = (bytes / 1024).toFixed(1) + '<span class="stat-unit">KB</span>';
     document.getElementById('stats').classList.add('on');
 
@@ -331,10 +331,15 @@ function downloadJson() {
     a.click();
 }
 
-// ── JSON highlight (unchanged) ────────────────────────────────────────────────
+// ── JSON highlight ────────────────────────────────────────────────────────────
+
+// The JSON holds text taken from the crawled pages: escape it first so it renders as text
+function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 function highlight(json) {
-    return json.replace(
+    return escapeHtml(json).replace(
         /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
         m => {
             if (/^"/.test(m)) return /:$/.test(m) ? `<span class="jk">${m}</span>` : `<span class="js">${m}</span>`;
