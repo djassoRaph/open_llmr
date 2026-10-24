@@ -2,18 +2,23 @@
 /**
  * config/generate.php — LLMR multi-page sitemap generator endpoint
  *
- * Mode A — Discovery (no sitemap_url in body):
- *   Rate-limits (30 per IP per hour), discovers the sitemap,
- *   returns { sitemap_url, pages_found, pages_capped? } or { error }
+ * Requests: POST, Content-Type: application/json, from this site only (no CORS headers;
+ * a cross-site Sec-Fetch-Site or a foreign Origin is refused).
+ *
+ * Mode A — Discovery (no sitemap_url in body, or "mode": "discover"):
+ *   Rate-limits (30 per IP per hour), discovers the sitemap (or reads the given
+ *   sitemap_url), returns { sitemap_url, pages_found, pages_capped? } or { error }
  *
  * Mode B — Processing (sitemap_url provided):
- *   Validates all input, then rate-limits (1 per IP per 24 h), fetches pages in
+ *   Checks the daily limit, counts the request against the hourly limit, validates
+ *   all input, then records the generation (1 per IP per 24 h), fetches pages in
  *   parallel, calls Mistral per-page, returns { llmr, stats, warning?, warning_mistral? }
  *
  * Every outbound fetch (sitemaps, robots.txt, pages, llms.txt) goes through
  * fetchMany(): http/https on port 80 or 443 only, every A/AAAA record of the host
- * must be public, curl is pinned to the checked address, redirects are followed
- * by hand and checked again at each hop, and bodies are capped while streaming.
+ * must be public and not this server's own address, curl is pinned to the checked
+ * address, redirects are followed by hand and checked again at each hop within one
+ * time budget, and bodies are capped while streaming.
  * Sitemaps and pages must stay on the submitted host (or its www./apex twin).
  *
  * tools/test_generate.php loads this file as a library by defining LLMR_GENERATE_LIB.
@@ -68,15 +73,25 @@ const BLOCKED_V6 = [
     '3fff::/20',        // documentation
 ];
 
+// This server's public addresses: never fetched, since a request to them reaches this
+// site and every vhost sharing the machine. LLMR_OWN_IPS (comma or space separated, in
+// .env or the environment) replaces this list; $_SERVER['SERVER_ADDR'] is always added.
+const OWN_IPS = ['109.234.166.135'];
+
+// The only page allowed to call this endpoint
+const ALLOWED_ORIGIN = 'https://open-llmr.org';
+
 // ─── Test seams ───────────────────────────────────────────────────────────────
 
-/** DNS and HTTP hooks. Null means real DNS and real curl; the test harness swaps in stubs. */
+/** DNS, HTTP and clock hooks. Null means the real thing; the test harness swaps in stubs. */
 final class Net
 {
     /** fn(string $host): list<string>|false */
     public static ?Closure $resolver = null;
     /** fn(array $requests): array, one response per request key (see curlExchange) */
     public static ?Closure $transport = null;
+    /** fn(): float, seconds on a monotonic clock */
+    public static ?Closure $clock = null;
     /** Per-request DNS answers, so one host is looked up once and every fetch pins the same address */
     public static array $dnsCache = [];
 }
@@ -154,6 +169,38 @@ function isPublicIp(string $ip): bool
         }
     }
     return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+}
+
+/** Packed address, with an IPv4 wrapped in IPv6 (mapped, NAT64) unwrapped; false if invalid. */
+function packedUnwrapped(string $ip): string|false
+{
+    $packed = @inet_pton(trim($ip));
+    if ($packed !== false && strlen($packed) === 16
+        && (cidrMatch($packed, '::ffff:0:0/96') || cidrMatch($packed, '64:ff9b::/96'))) {
+        return substr($packed, 12);
+    }
+    return $packed;
+}
+
+/** True when $ip is this server: SERVER_ADDR, or OWN_IPS (replaced by LLMR_OWN_IPS when set). */
+function isOwnAddress(string $ip): bool
+{
+    $configured = $_ENV['LLMR_OWN_IPS'] ?? getenv('LLMR_OWN_IPS');
+    $own = is_string($configured) && trim($configured) !== ''
+         ? (array) preg_split('/[\s,]+/', trim($configured))
+         : OWN_IPS;
+    $own[] = (string) ($_SERVER['SERVER_ADDR'] ?? '');
+
+    $packed = packedUnwrapped($ip);
+    if ($packed === false) {
+        return false;
+    }
+    foreach ($own as $candidate) {
+        if (packedUnwrapped((string) $candidate) === $packed) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ─── SSRF guard: hosts and URLs ───────────────────────────────────────────────
@@ -307,7 +354,7 @@ function refused(string $reason): array
  * Returns ['ok' => true, url, origin, scheme, host, kind, port, ip] where url is rebuilt
  * from the parsed parts (so curl parses exactly what we checked) and ip is the address
  * to pin; or ['ok' => false, 'error' => reason]. Reasons: bad_url, bad_scheme,
- * credentials, bad_host, bad_port, off_origin, dns_failed, private_address.
+ * credentials, bad_host, bad_port, off_origin, dns_failed, private_address, own_address.
  *
  * @param list<string>|null $scope allowed hosts, or null for any public host
  */
@@ -353,6 +400,9 @@ function prepareRequest(string $url, ?array $scope): array
     foreach ($ips as $ip) {
         if (!isPublicIp($ip)) {
             return refused('private_address');
+        }
+        if (isOwnAddress($ip)) {
+            return refused('own_address');
         }
     }
 
@@ -451,8 +501,9 @@ function curlExchange(array $requests): array
             // Pin the connection to the address we checked: no second DNS lookup, no rebinding
             CURLOPT_CONNECT_TO      => ["::{$addr}:{$req['port']}"],
             CURLOPT_PROXY           => '',
-            CURLOPT_CONNECTTIMEOUT  => min(CONNECT_TIMEOUT, $req['timeout']),
-            CURLOPT_TIMEOUT         => $req['timeout'],
+            // What is left of the fetch's budget (fetchMany never passes 0, which curl reads as "no limit")
+            CURLOPT_CONNECTTIMEOUT_MS => min(CONNECT_TIMEOUT * 1000, $req['timeout_ms']),
+            CURLOPT_TIMEOUT_MS      => $req['timeout_ms'],
             CURLOPT_NOSIGNAL        => true,
             CURLOPT_ENCODING        => '',
             CURLOPT_USERAGENT       => LLMR_UA,
@@ -537,9 +588,17 @@ function fetchFailure(string $url, string $error, int $status = 0): array
     return ['ok' => false, 'status' => $status, 'type' => '', 'body' => '', 'url' => $url, 'truncated' => false, 'error' => $error];
 }
 
+/** Seconds on a monotonic clock. */
+function clockNow(): float
+{
+    return Net::$clock !== null ? (Net::$clock)() : hrtime(true) / 1e9;
+}
+
 /**
  * Fetch URLs in parallel through the guard. Redirects (up to MAX_REDIRECTS) are followed
  * by hand, and every hop is checked again: scheme, port, scope, DNS and address.
+ * $opt['timeout'] is the budget of each whole fetch, redirects included: every hop gets
+ * what is left of it, and a fetch whose budget is spent fails with 'timeout'.
  *
  * @param array<string|int,string> $urls
  * @param array{cap:int,timeout:int,accept:string,scope:?array} $opt
@@ -551,16 +610,32 @@ function fetchMany(array $urls, array $opt): array
     $transport = Net::$transport ?? curlExchange(...);
     $results   = [];
     $pending   = $urls;
+    $deadline  = clockNow() + $opt['timeout']; // all fetches start together, so they share it
 
     for ($hop = 0; $pending; $hop++) {
         $requests = [];
         foreach ($pending as $key => $url) {
+            if (clockNow() >= $deadline) {
+                $results[$key] = fetchFailure($url, 'timeout');
+                continue;
+            }
             $req = prepareRequest($url, $opt['scope']);
             if (!$req['ok']) {
                 $results[$key] = fetchFailure($url, $req['error']);
                 continue;
             }
-            $requests[$key] = $req + ['cap' => $opt['cap'], 'timeout' => $opt['timeout'], 'accept' => $opt['accept']];
+            $requests[$key] = $req + ['cap' => $opt['cap'], 'accept' => $opt['accept']];
+        }
+
+        // Measured after DNS, so lookups come out of the same budget; never 0 (no limit to curl)
+        $leftMs = (int) floor(($deadline - clockNow()) * 1000);
+        foreach ($requests as $key => $req) {
+            if ($leftMs < 1) {
+                $results[$key] = fetchFailure($req['url'], 'timeout');
+                unset($requests[$key]);
+                continue;
+            }
+            $requests[$key]['timeout_ms'] = $leftMs;
         }
 
         $pending   = [];
@@ -718,10 +793,20 @@ function rateKey(string $ip): string
     return inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
 }
 
+/** Replace the content of an open file: rewind, write all of it, cut to its length, flush. */
+function overwriteFile($fh, string $content): bool
+{
+    return rewind($fh)
+        && @fwrite($fh, $content) === strlen($content)
+        && ftruncate($fh, strlen($content))
+        && fflush($fh);
+}
+
 /**
  * Sliding-window limit: at most $max hits per $key in $window seconds, stored as
  * { key: [timestamps] } in $logFile. Read, check and write happen under one flock.
- * With $record false it only checks. Returns null when the log cannot be used.
+ * With $record false it only checks. Returns null when the log cannot be used,
+ * including when the new log cannot be encoded or written (the old one is put back).
  *
  * @return array{limited: bool, next?: string}|null
  */
@@ -739,7 +824,8 @@ function rateLimit(string $logFile, string $key, int $window, int $max, bool $re
         return null;
     }
 
-    $data = json_decode((string) stream_get_contents($fh), true);
+    $raw  = (string) stream_get_contents($fh);
+    $data = json_decode($raw, true);
     $data = is_array($data) ? $data : [];
     $now  = time();
 
@@ -760,10 +846,18 @@ function rateLimit(string $logFile, string $key, int $window, int $max, bool $re
             $hits[]     = $now;
             $data[$key] = $hits;
         }
-        ftruncate($fh, 0);
-        rewind($fh);
-        fwrite($fh, (string) json_encode($data));
-        fflush($fh);
+        // Encode before touching the file, and overwrite in place rather than truncate first:
+        // a failed write (disk full) puts the old log back and fails closed instead of wiping it
+        $json = json_encode($data);
+        if ($json === false || !overwriteFile($fh, $json)) {
+            if ($json !== false) {
+                overwriteFile($fh, $raw);
+            }
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            error_log("generate.php: cannot write rate-limit log {$logFile}");
+            return null;
+        }
     }
     flock($fh, LOCK_UN);
     fclose($fh);
@@ -790,14 +884,17 @@ function fetchPagesParallel(array $urls, array $scope, int $timeout = 8): array
     return $pages;
 }
 
-/** True when the response is a served llms.txt: 200 and not an HTML page (soft 404s are HTML). */
+/**
+ * True when the response is a served llms.txt: 200, not an HTML page, and Markdown that
+ * opens with a heading (# Site name), so soft 404s in HTML, JSON or plain text don't count.
+ */
 function servesLlmsTxt(array $r): bool
 {
     if (!$r['ok'] || $r['status'] !== 200 || str_contains(strtolower($r['type']), 'html')) {
         return false;
     }
     $text = ltrim(preg_replace('/^\xEF\xBB\xBF/', '', $r['body']) ?? '');
-    return $text !== '' && $text[0] !== '<';
+    return str_starts_with($text, '#');
 }
 
 // ─── Metadata extraction ──────────────────────────────────────────────────────
@@ -1006,6 +1103,43 @@ function buildPage(array $meta, string $pageUrl, string $summary): array
     return $page;
 }
 
+// ─── Mode A: discovery ────────────────────────────────────────────────────────
+
+/**
+ * Find the site's sitemap, or read the one given, and count its pages on this site.
+ * The caller has already counted the request against the discovery limit.
+ *
+ * @return array{0: array, 1: int} [response payload, HTTP status]
+ */
+function discoverPages(string $inputUrl, string $sitemapUrl): array
+{
+    $target = prepareRequest($inputUrl, null);
+    if (!$target['ok']) {
+        return [['error' => 'refused_url', 'field' => 'url', 'reason' => $target['error']], 400];
+    }
+    $scope = scopeHosts($target['host']);
+
+    if ($sitemapUrl !== '') {
+        $sitemap = prepareRequest($sitemapUrl, $scope);
+        if (!$sitemap['ok']) {
+            return [['error' => 'refused_url', 'field' => 'sitemap_url', 'reason' => $sitemap['error']], 400];
+        }
+        $found = $sitemapUrl;
+    } else {
+        $found = discoverSitemap($target['origin'], $scope);
+        if ($found === false) {
+            return [['error' => 'sitemap_not_found'], 200];
+        }
+    }
+    [$urls, $capped] = getUrlsFromSitemap($found, $scope);
+
+    $payload = ['sitemap_url' => $found, 'pages_found' => count($urls)];
+    if ($capped) {
+        $payload['pages_capped'] = true;
+    }
+    return [$payload, 200];
+}
+
 // ─── Response helper ──────────────────────────────────────────────────────────
 
 function respond(array $payload, int $status = 200, int $flags = 0): never
@@ -1024,15 +1158,22 @@ if (defined('LLMR_GENERATE_LIB')) {
 set_time_limit(120);
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
-}
+// No CORS headers: only generate.html on this site may call the endpoint
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Allow: POST');
     respond(['error' => 'method_not_allowed'], 405);
+}
+// A request another site makes a visitor's browser send is refused before it costs anything
+$requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? null;
+if (($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '') === 'cross-site'
+    || ($requestOrigin !== null && $requestOrigin !== ALLOWED_ORIGIN)) {
+    respond(['error' => 'forbidden_origin'], 403);
+}
+// JSON only: a form post or a "simple" cross-site request can't send it without a preflight
+$contentType = (string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+if (strtolower(trim(explode(';', $contentType)[0])) !== 'application/json') {
+    respond(['error' => 'unsupported_media_type'], 415);
 }
 
 loadEnv(__DIR__ . '/../.env');
@@ -1047,19 +1188,22 @@ $body       = is_array($body) ? $body : [];
 $inputUrl   = trim(is_string($body['url'] ?? null) ? $body['url'] : '');
 $sitemapUrl = trim(is_string($body['sitemap_url'] ?? null) ? $body['sitemap_url'] : '');
 
-if ($inputUrl === '' || !filter_var($inputUrl, FILTER_VALIDATE_URL)) {
+// No syntax pre-check here: prepareRequest() is stricter, and accepts IDN and underscore hosts
+if ($inputUrl === '') {
     respond(['error' => 'invalid_url'], 400);
 }
 
-$clientKey = rateKey($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
-$dataDir   = __DIR__ . '/../data';
+$clientKey    = rateKey($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+$dataDir      = __DIR__ . '/../data';
+$discoveryLog = $dataDir . '/discovery_log.json';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// MODE A — Discovery only (no sitemap_url provided)
+// MODE A — Discovery only (no sitemap_url, or "mode": "discover" to count the pages
+// of a given sitemap before spending the day's generation on it)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if ($sitemapUrl === '') {
+if ($sitemapUrl === '' || ($body['mode'] ?? null) === 'discover') {
     // ─── Own limit, counted before any DNS lookup or fetch ──────────────────────
-    $rate = rateLimit($dataDir . '/discovery_log.json', $clientKey, DISCOVERY_WINDOW, DISCOVERY_LIMIT, true);
+    $rate = rateLimit($discoveryLog, $clientKey, DISCOVERY_WINDOW, DISCOVERY_LIMIT, true);
     if ($rate === null) {
         respond(['error' => 'rate_limit_unavailable'], 503);
     }
@@ -1067,31 +1211,13 @@ if ($sitemapUrl === '') {
         respond(['error' => 'discovery_rate_limited', 'next_available' => $rate['next']], 429);
     }
 
-    $target = prepareRequest($inputUrl, null);
-    if (!$target['ok']) {
-        respond(['error' => 'refused_url', 'field' => 'url', 'reason' => $target['error']], 400);
-    }
-    $scope = scopeHosts($target['host']);
-
-    $discovered = discoverSitemap($target['origin'], $scope);
-    if ($discovered === false) {
-        respond(['error' => 'sitemap_not_found']);
-    }
-    [$urls, $capped] = getUrlsFromSitemap($discovered, $scope);
-
-    $response = ['sitemap_url' => $discovered, 'pages_found' => count($urls)];
-    if ($capped) {
-        $response['pages_capped'] = true;
-    }
-    respond($response);
+    [$payload, $status] = discoverPages($inputUrl, $sitemapUrl);
+    respond($payload, $status);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MODE B — Full processing (sitemap_url provided)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-if (!filter_var($sitemapUrl, FILTER_VALIDATE_URL)) {
-    respond(['error' => 'invalid_sitemap_url'], 400);
-}
 
 // ─── IP rate limit: 1 generation per IP per 24 h ─────────────────────────────
 // Check first without recording, so a client that is already limited costs no DNS lookup
@@ -1102,6 +1228,15 @@ if ($rate === null) {
 }
 if ($rate['limited']) {
     respond(['error' => 'rate_limited', 'next_available' => $rate['next']], 429);
+}
+
+// Validation looks up names the client picks: count it against the hourly limit first
+$rate = rateLimit($discoveryLog, $clientKey, DISCOVERY_WINDOW, DISCOVERY_LIMIT, true);
+if ($rate === null) {
+    respond(['error' => 'rate_limit_unavailable'], 503);
+}
+if ($rate['limited']) {
+    respond(['error' => 'discovery_rate_limited', 'next_available' => $rate['next']], 429);
 }
 
 // Validate all input before the generation is recorded

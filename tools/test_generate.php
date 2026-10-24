@@ -1,9 +1,10 @@
 <?php
 /**
  * tools/test_generate.php: tests for config/generate.php (SSRF guard, scope rules,
- * rate limits, LLMR v2.1 output helpers).
+ * time budgets, rate limits, request gate, LLMR v2.1 output helpers).
  *
  * Run:  wsl -e php8.3 tools/test_generate.php
+ * (the page script has its own: node tools/test_generate_js.mjs)
  *
  * DNS is stubbed (Net::$resolver) and HTTP is scripted (Net::$transport), except in the
  * last two sections: they start `php -S` on 127.0.0.1, drive the real curl transport
@@ -96,6 +97,10 @@ const STUB_DNS = [
     'sixtofour.example.com'  => ['2002:c0a8:101::1'],       // wraps 192.168.1.1
     'teredo.example.com'     => ['2001:0:4136:e378:8000:63bf:3fff:fdd2'],
     'nxdomain.example.com'   => false,
+    'cotenant.example.com'   => ['109.234.166.135'],                  // a vhost on this server
+    'mixedown.example.com'   => ['93.184.216.34', '109.234.166.135'],
+    'under_score.example.com'   => ['93.184.216.34'],
+    'xn--bcher-kva.example.com' => ['93.184.216.34'],                 // bücher.example.com
 ];
 
 $dnsCalls    = [];
@@ -338,6 +343,38 @@ same('IDN host converted to punycode', ['xn--bcher-kva.example.com', 'name'], no
 prepareRequest("https://b\u{fc}cher.example.com/", null);
 same('IDN host resolved in ASCII form', ['xn--bcher-kva.example.com'], $GLOBALS['dnsCalls']);
 
+// The endpoint no longer runs FILTER_VALIDATE_URL first: it refused these valid hosts
+foreach (["https://b\u{fc}cher.example.com/", 'https://under_score.example.com/'] as $url) {
+    same("accepted by the guard, refused by FILTER_VALIDATE_URL: {$url}", ['ACCEPTED', false],
+         [reason(prepareRequest($url, null)), filter_var($url, FILTER_VALIDATE_URL) !== false]);
+}
+
+// This server's own public address, and every vhost sharing it, is never fetched
+$ownCases = [
+    ['http://109.234.166.135/', 'own_address'],
+    ['https://cotenant.example.com/', 'own_address'],
+    ['https://mixedown.example.com/', 'own_address'],
+    ['http://[::ffff:109.234.166.135]/', 'own_address'],
+    ['http://[64:ff9b::6dea:a687]/', 'own_address'],     // NAT64 form of 109.234.166.135
+    ['http://109.234.166.136/', 'ACCEPTED'],
+];
+foreach ($ownCases as [$url, $expected]) {
+    same("own address (default list): {$url}", $expected, reason(prepareRequest($url, null)));
+}
+$_SERVER['SERVER_ADDR'] = '93.184.216.40';
+same('SERVER_ADDR refused', 'own_address', reason(prepareRequest('http://93.184.216.40/', null)));
+$_SERVER['SERVER_ADDR'] = '::ffff:93.184.216.40';
+same('SERVER_ADDR given IPv4-mapped still matches the IPv4', 'own_address', reason(prepareRequest('http://93.184.216.40/', null)));
+unset($_SERVER['SERVER_ADDR']);
+same('SERVER_ADDR unset: address accepted again', 'ACCEPTED', reason(prepareRequest('http://93.184.216.40/', null)));
+$_ENV['LLMR_OWN_IPS'] = ' 93.184.216.41, 2606:4700::99 ';
+same('LLMR_OWN_IPS: IPv4 refused', 'own_address', reason(prepareRequest('http://93.184.216.41/', null)));
+same('LLMR_OWN_IPS: IPv6 refused', 'own_address', reason(prepareRequest('http://[2606:4700:0:0::99]/', null)));
+same('LLMR_OWN_IPS replaces the default list', 'ACCEPTED', reason(prepareRequest('http://109.234.166.135/', null)));
+$_SERVER['SERVER_ADDR'] = '109.234.166.135';
+same('LLMR_OWN_IPS set: SERVER_ADDR still refused', 'own_address', reason(prepareRequest('http://109.234.166.135/', null)));
+unset($_SERVER['SERVER_ADDR'], $_ENV['LLMR_OWN_IPS']);
+
 $GLOBALS['dnsCalls'] = [];
 prepareRequest('https://site.example.com/a', null);
 prepareRequest('https://site.example.com/b', null);
@@ -415,6 +452,8 @@ $redirectRoutes = [
     'https://site.example.com/to-protorel'      => redirect('//other.example.net/x'),
     'https://site.example.com/to-backslash'     => redirect('/\\other.example.net/'),
     'https://site.example.com/to-loopback-name' => redirect('https://loopback.example.com/'),
+    'https://site.example.com/to-own'           => redirect('http://109.234.166.135/'),
+    'https://site.example.com/to-cotenant'      => redirect('https://cotenant.example.com/admin'),
     'https://site.example.com/to-www'           => redirect('https://www.site.example.com/landing', 301),
     'https://www.site.example.com/landing'      => page('<title>www</title>'),
     'https://site.example.com/rel'              => redirect('next/../final?x=1', 307),
@@ -449,6 +488,8 @@ $redirectCases = [
     ['/to-protorel', $scope, 'off_origin', 1],
     ['/to-backslash', $scope, 'bad_url', 1],
     ['/to-loopback-name', null, 'private_address', 1],
+    ['/to-own', null, 'own_address', 1],
+    ['/to-cotenant', null, 'own_address', 1],
     ['/to-www', $scope, '', 2],
     ['/rel', $scope, '', 2],
     ['/hop1', $scope, '', 4],
@@ -469,6 +510,46 @@ same('relative Location resolved against the current URL', 'https://site.example
 same('body of the final hop', '<title>final</title>', $r['body']);
 $r = guardedFetch('https://site.example.com/no-location', 1024, 5, $scope, ACCEPT_HTML);
 same('3xx without Location is a failed fetch, not a crash', [false, 302], [$r['ok'], $r['status']]);
+
+// One time budget per fetch, redirects included: a fake clock where each round trip takes $tripSeconds
+$fakeNow     = 1000.0;
+$tripSeconds = 4.0;
+Net::$clock  = function () use (&$fakeNow): float {
+    return $fakeNow;
+};
+$withTrips = function () use (&$fakeNow, &$tripSeconds): void {
+    $inner = Net::$transport;
+    Net::$transport = function (array $requests) use ($inner, &$fakeNow, &$tripSeconds): array {
+        $fakeNow += $tripSeconds;
+        return $inner($requests);
+    };
+};
+$budgets = fn() => array_map(fn(array $q) => $q['timeout_ms'], $GLOBALS['httpLog']);
+
+useStubHttp($redirectRoutes);
+$withTrips();
+$r = guardedFetch('https://site.example.com/hop1', 1024, 10, $scope, ACCEPT_HTML);
+same('budget: each hop gets what is left of 10 s (ms)', [10000, 6000, 2000], $budgets());
+same('budget: spent after 3 hops, the 4th is never sent', ['timeout', 3], [$r['error'], count($GLOBALS['httpLog'])]);
+
+useStubHttp($redirectRoutes);
+$withTrips();
+$r = guardedFetch('https://site.example.com/hop1', 1024, 20, $scope, ACCEPT_HTML);
+same('budget: a chain that fits its budget still completes', [true, [20000, 16000, 12000, 8000]], [$r['ok'], $budgets()]);
+
+useStubHttp($redirectRoutes);
+$withTrips();
+$tripSeconds = 9.9995; // leaves half a millisecond: curl would read 0 ms as "no limit"
+$r = guardedFetch('https://site.example.com/hop1', 1024, 10, $scope, ACCEPT_HTML);
+same('budget: under 1 ms left fails as timeout, never sent with 0', ['timeout', [10000]], [$r['error'], $budgets()]);
+
+useStubHttp($redirectRoutes);
+$withTrips();
+$tripSeconds = 4.0;
+$pages = fetchMany(['x' => 'https://site.example.com/a', 'y' => 'https://site.example.com/hop1'],
+                   ['cap' => 1024, 'timeout' => 10, 'accept' => ACCEPT_HTML, 'scope' => $scope]);
+same('budget: parallel fetches each keep their own result', [true, 'timeout'], [$pages['x']['ok'], $pages['y']['error']]);
+Net::$clock = null;
 
 // Parallel page fetch uses the same guard
 useStubHttp($redirectRoutes);
@@ -508,7 +589,7 @@ same('requests sent', 4, count($GLOBALS['httpLog']));
 
 // ─── 8. Sitemaps ──────────────────────────────────────────────────────────────
 
-section('8. Sitemaps: scope filter, no DNS per <loc>, caps');
+section('8. Sitemaps: scope filter, no DNS per <loc>, caps, Mode A page count');
 
 useStubDns();
 $urlset = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -581,6 +662,38 @@ same('robots.txt: candidates and robots fetched from the site only', ['site.exam
 useStubHttp(['https://site.example.com/sitemap.xml' => page($urlset, 'application/xml')]);
 same('sitemap.xml found first', 'https://site.example.com/sitemap.xml', discoverSitemap('https://site.example.com', $scope));
 
+// Mode A: count the pages of the discovered sitemap, or of the one the user typed
+useStubDns();
+useStubHttp([
+    'https://site.example.com/sitemap.xml'   => page($urlset, 'application/xml'),
+    'https://www.site.example.com/posts.xml' => page($posts, 'application/xml'),
+    'https://site.example.com/empty.xml'     => page('<urlset></urlset>', 'application/xml'),
+]);
+same('Mode A, discovered sitemap: pages on the site counted',
+     [['sitemap_url' => 'https://site.example.com/sitemap.xml', 'pages_found' => 4], 200],
+     discoverPages('https://site.example.com/', ''));
+$GLOBALS['httpLog'] = [];
+same('Mode A, given sitemap: its pages counted',
+     [['sitemap_url' => 'https://www.site.example.com/posts.xml', 'pages_found' => 1], 200],
+     discoverPages('https://site.example.com/', 'https://www.site.example.com/posts.xml'));
+same('Mode A, given sitemap: only that sitemap requested, no discovery',
+     ['https://www.site.example.com/posts.xml'], array_column($GLOBALS['httpLog'], 'url'));
+same('Mode A, given empty sitemap: 0 pages (the page stops before Mode B)',
+     [['sitemap_url' => 'https://site.example.com/empty.xml', 'pages_found' => 0], 200],
+     discoverPages('https://site.example.com/', 'https://site.example.com/empty.xml'));
+same('Mode A, given sitemap that is missing: 0 pages',
+     [['sitemap_url' => 'https://site.example.com/missing.xml', 'pages_found' => 0], 200],
+     discoverPages('https://site.example.com/', 'https://site.example.com/missing.xml'));
+$GLOBALS['httpLog'] = [];
+same('Mode A, given sitemap off the site: refused with its field',
+     [['error' => 'refused_url', 'field' => 'sitemap_url', 'reason' => 'off_origin'], 400],
+     discoverPages('https://site.example.com/', 'https://other.example.net/sitemap.xml'));
+same('Mode A, given sitemap off the site: nothing requested', 0, count($GLOBALS['httpLog']));
+same('Mode A, refused url',
+     [['error' => 'refused_url', 'field' => 'url', 'reason' => 'private_address'], 400],
+     discoverPages('http://127.0.0.1/', ''));
+same('Mode A, no sitemap anywhere', [['error' => 'sitemap_not_found'], 200], discoverPages('https://other.example.net/', ''));
+
 // ─── 9. llms.txt pairing ──────────────────────────────────────────────────────
 
 section('9. llms.txt detection');
@@ -594,6 +707,10 @@ same('200 text/html (soft 404)', false, servesLlmsTxt($fetched(['type' => 'text/
 same('200 text/plain but HTML body', false, servesLlmsTxt($fetched(['body' => "\n<!DOCTYPE html><html>"])));
 same('200 empty', false, servesLlmsTxt($fetched(['body' => " \n"])));
 same('404', false, servesLlmsTxt($fetched(['ok' => false, 'status' => 404])));
+same('200 JSON soft 404', false, servesLlmsTxt($fetched(['type' => 'application/json', 'body' => '{"error":"not found"}'])));
+same('200 text/plain soft 404', false, servesLlmsTxt($fetched(['body' => "Not Found\n"])));
+same('200 text/plain, no heading first', false, servesLlmsTxt($fetched(['body' => "Site\n# Heading later\n"])));
+same('200 BOM, blank lines, then the heading', true, servesLlmsTxt($fetched(['body' => "\xEF\xBB\xBF\n \n# Site\n"])));
 
 useStubDns();
 useStubHttp([
@@ -640,6 +757,36 @@ same('expired hit replaced by the new one', 1, count($stored['203.0.113.11']));
 
 file_put_contents($genLog, 'not json');
 same('corrupt log treated as empty', false, rateLimit($genLog, '203.0.113.12', GENERATION_WINDOW, GENERATION_LIMIT, true)['limited']);
+
+// A new log that cannot be encoded or written fails closed and leaves the old one in place
+$writeLog = "{$TMP}/data/write.json";
+$before   = (string) json_encode(['198.51.100.20' => [time() - 10]]);
+file_put_contents($writeLog, $before);
+$previousLog = ini_set('error_log', "{$TMP}/error.log");
+same('unencodable log: fails closed (null)', null, rateLimit($writeLog, "\xFF\xFE", 3600, 5, true));
+ini_set('error_log', (string) $previousLog);
+same('unencodable log: file untouched', $before, file_get_contents($writeLog));
+
+if (function_exists('pcntl_fork') && function_exists('posix_setrlimit') && defined('SIGXFSZ')) {
+    // Short write: in a child process the log may not grow past its current size, as on a full disk
+    $fullLog = "{$TMP}/data/full.json";
+    $before  = (string) json_encode(['198.51.100.21' => [time() - 10], '198.51.100.22' => [time() - 20]]);
+    file_put_contents($fullLog, $before);
+    $pid = pcntl_fork();
+    if ($pid === 0) {
+        ini_set('error_log', '/dev/null');
+        pcntl_signal(SIGXFSZ, SIG_IGN); // fail the write with EFBIG instead of killing the process
+        posix_setrlimit(POSIX_RLIMIT_FSIZE, strlen($before), strlen($before));
+        $r = rateLimit($fullLog, '198.51.100.23', 3600, 5, true);
+        exit($r === null ? 0 : 1);
+    }
+    pcntl_waitpid($pid, $status);
+    same('short write: fails closed (null), no success reported', [true, 0], [pcntl_wifexited($status), pcntl_wexitstatus($status)]);
+    same('short write: old log put back, not emptied', $before, file_get_contents($fullLog));
+    same('short write: the log still limits afterwards', true, rateLimit($fullLog, '198.51.100.21', 3600, 1, false)['limited']);
+} else {
+    skip('short write', 'pcntl or posix not available');
+}
 
 same('rateKey IPv4', '198.51.100.7', rateKey('198.51.100.7'));
 same('rateKey IPv6 groups the /64', '2001:db8:1:2::/64', rateKey('2001:db8:1:2:3:4:5:6'));
@@ -690,6 +837,8 @@ $source = (string) file_get_contents(__DIR__ . '/../config/generate.php');
 check('no mb_convert_encoding(..., HTML-ENTITIES) left', !preg_match('/mb_convert_encoding\([^;]*HTML-ENTITIES/', $source));
 check('no automatic redirect following left', !preg_match('/CURLOPT_FOLLOWLOCATION\s*=>\s*true/', $source));
 check("output version is LLMR_VERSION ('v' => LLMR_VERSION)", (bool) preg_match("/'v'\s*=>\s*LLMR_VERSION/", $source));
+check('no FILTER_VALIDATE_URL pre-check left (it refuses IDN and underscore hosts)', !str_contains($source, 'FILTER_VALIDATE_URL'));
+check('no CORS header sent by the endpoint', !preg_match('/header\([\'"]Access-Control-/i', $source));
 
 $utf8 = '<!doctype html><html><head><meta charset="utf-8"><title>Café déjà vu – “quotes” 日本語</title>'
       . '<meta name="description" content="Très bien, ça marche"><meta name="author" content="Raphaël Reck"></head>'
@@ -761,6 +910,10 @@ switch ($path) {
     case '/redirect-loop':
         header('Location: /redirect-loop', true, 302);
         exit;
+    case '/slow-redirect':
+        usleep(600000);
+        header('Location: /slow-redirect', true, 302);
+        exit;
 }
 return false;
 PHP);
@@ -802,7 +955,7 @@ $hits = function () use ($site): array {
 /** A request as prepareRequest() would build it, pinned to the local server. */
 $pinned = fn(string $path, int $cap = CAP_PAGE, string $scheme = 'http') => [
     'url'  => "{$scheme}://pin-test.invalid:{$port}{$path}", 'host' => 'pin-test.invalid', 'kind' => 'name',
-    'port' => $port, 'ip' => '127.0.0.1', 'cap' => $cap, 'timeout' => 10, 'accept' => ACCEPT_HTML,
+    'port' => $port, 'ip' => '127.0.0.1', 'cap' => $cap, 'timeout_ms' => 10000, 'accept' => ACCEPT_HTML,
 ];
 
 if ($server === null) {
@@ -868,25 +1021,54 @@ if ($server === null) {
     $r = guardedFetch('https://site.example.com/redirect-loop', CAP_PAGE, 10, $scope, ACCEPT_HTML);
     same('end to end: redirect loop stops after ' . MAX_REDIRECTS . ' redirects', 'too_many_redirects', $r['error']);
     same('end to end: 1 + ' . MAX_REDIRECTS . ' requests', 1 + MAX_REDIRECTS, count($hits()));
+
+    // Each hop takes 0.6 s: with one 1 s budget the second hop is cut off by curl,
+    // where a fresh timeout per hop would run all 4 hops (2.4 s)
+    $t0 = microtime(true);
+    $r  = guardedFetch('https://site.example.com/slow-redirect', CAP_PAGE, 1, $scope, ACCEPT_HTML);
+    $dt = microtime(true) - $t0;
+    check('end to end: slow redirect chain fails once its 1 s budget is spent',
+          in_array($r['error'], ['transport', 'timeout'], true), "error '{$r['error']}'");
+    check('end to end: whole chain took about 1 s, not 1 s per hop', $dt < 1.5, sprintf('%.2fs', $dt));
+    same('end to end: slow chain sent 2 hops', ['/slow-redirect', '/slow-redirect'], $hits());
     Net::$transport = null;
 }
 
 // ─── 13. Endpoint: refusals and rate-limit order ──────────────────────────────
 
-section('13. Endpoint (copy in a temp docroot): bad input is refused, Mode B records only valid input');
+section('13. Endpoint (copy in a temp docroot): request gate, bad input refused, limits counted in order');
 
-$call = function (array|null $json, string $method = 'POST') use ($port): array {
-    $ch = curl_init("http://127.0.0.1:{$port}/config/generate.php");
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method, CURLOPT_TIMEOUT => 20]);
-    if ($json !== null) {
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($json));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+/** Raw request: [status, decoded body, lower-cased response headers]. */
+$request = function (string $method, ?string $body, array $headers = []) use ($port): array {
+    $ch       = curl_init("http://127.0.0.1:{$port}/config/generate.php");
+    $received = [];
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method, CURLOPT_TIMEOUT => 20,
+        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_HEADERFUNCTION => function ($ch, string $line) use (&$received): int {
+            if (str_contains($line, ':')) {
+                [$name, $value] = explode(':', $line, 2);
+                $received[strtolower(trim($name))] = trim($value);
+            }
+            return strlen($line);
+        },
+    ]);
+    if ($body !== null) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     }
-    $body   = (string) curl_exec($ch);
+    $out    = (string) curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
-    return [$status, json_decode($body, true) ?? $body];
+    return [$status, json_decode($out, true) ?? $out, $received];
 };
+/** JSON request as generate.js sends it: [status, decoded body]. */
+$call = function (array|null $json, string $method = 'POST', array $headers = []) use ($request): array {
+    if ($json !== null) {
+        $headers[] = 'Content-Type: application/json';
+    }
+    return array_slice($request($method, $json === null ? null : (string) json_encode($json), $headers), 0, 2);
+};
+$hitsIn = fn(string $log) => count((json_decode((string) @file_get_contents($log), true) ?: [])['127.0.0.1'] ?? []);
 
 if ($server === null) {
     skip('endpoint tests', 'could not start php -S');
@@ -894,10 +1076,43 @@ if ($server === null) {
     $ipLog   = "{$site}/data/ip_log.json";
     $discLog = "{$site}/data/discovery_log.json";
 
+    // Only this site's page, sending JSON, may call the endpoint
     same('GET is 405', [405, ['error' => 'method_not_allowed']], $call(null, 'GET'));
-    same('malformed url', [400, ['error' => 'invalid_url']], $call(['url' => 'not a url']));
-    same('url as an array', [400, ['error' => 'invalid_url']], $call(['url' => ['http://x.com']]));
+    [$status, $data, $headers] = $request('OPTIONS', null, ['Origin: https://evil.example.net', 'Access-Control-Request-Method: POST']);
+    same('OPTIONS preflight is 405, without CORS headers', [405, false], [$status, isset($headers['access-control-allow-origin'])]);
+    [$status, $data, $headers] = $request('POST', '{"url":""}', ['Content-Type: application/json']);
+    same('POST answer carries no CORS headers', [400, false, false],
+         [$status, isset($headers['access-control-allow-origin']), isset($headers['access-control-allow-methods'])]);
+    $gate = [
+        ['text/plain (a "simple" cross-site request)', '{"url":"https://site.example.com/"}', ['Content-Type: text/plain'], 415, 'unsupported_media_type'],
+        ['form post', 'url=https%3A%2F%2Fsite.example.com%2F', ['Content-Type: application/x-www-form-urlencoded'], 415, 'unsupported_media_type'],
+        ['no Content-Type', '{"url":"https://site.example.com/"}', ['Content-Type:'], 415, 'unsupported_media_type'],
+        ['foreign Origin', '{"url":"https://site.example.com/"}', ['Content-Type: application/json', 'Origin: https://evil.example.net'], 403, 'forbidden_origin'],
+        ['Origin: null', '{"url":"https://site.example.com/"}', ['Content-Type: application/json', 'Origin: null'], 403, 'forbidden_origin'],
+        ['look-alike Origin', '{"url":"https://site.example.com/"}', ['Content-Type: application/json', 'Origin: https://open-llmr.org.evil.example.net'], 403, 'forbidden_origin'],
+        ['Sec-Fetch-Site: cross-site', '{"url":"https://site.example.com/"}', ['Content-Type: application/json', 'Sec-Fetch-Site: cross-site'], 403, 'forbidden_origin'],
+        ['same-origin page, JSON with charset', '{"url":""}', ['Content-Type: application/json; charset=utf-8', 'Origin: https://open-llmr.org', 'Sec-Fetch-Site: same-origin'], 400, 'invalid_url'],
+    ];
+    foreach ($gate as [$label, $body, $headers, $status, $error]) {
+        [$gotStatus, $data] = $request('POST', $body, $headers);
+        same("request gate: {$label}", [$status, $error], [$gotStatus, $data['error'] ?? null]);
+    }
+    same('request gate: refused requests cost no lookup (nothing counted)', 0, $hitsIn($discLog));
 
+    // No FILTER_VALIDATE_URL pre-check: the guard decides, and names its reason
+    same('url missing', [400, ['error' => 'invalid_url']], $call(['sitemap_url' => 'https://site.example.com/sitemap.xml']));
+    same('url as an array', [400, ['error' => 'invalid_url']], $call(['url' => ['http://x.com']]));
+    $noPrecheck = [
+        ['not a url', 'bad_url'],
+        ["http://b\u{fc}cher.localhost/", 'bad_host'],      // IDN: refused by the guard for .localhost,
+        ['http://under_score.localhost/', 'bad_host'],      // not by a syntax pre-check
+    ];
+    foreach ($noPrecheck as [$url, $reason]) {
+        [$status, $data] = $call(['url' => $url]);
+        same("no pre-check: {$url} reaches the guard", [400, 'refused_url', $reason], [$status, $data['error'] ?? null, $data['reason'] ?? null]);
+    }
+
+    @unlink($discLog);
     $modeA = [
         ['http://127.0.0.1/', 'private_address'],
         ['http://169.254.169.254/latest/meta-data/', 'private_address'],
@@ -912,14 +1127,23 @@ if ($server === null) {
         $got = $data['error'] === 'refused_url' ? $data['reason'] : $data['error'];
         same("Mode A refuses {$url}", [400, $reason], [$status, $got]);
     }
-    $disc = json_decode((string) @file_get_contents($discLog), true) ?: [];
-    same('Mode A: every lookup counted in data/discovery_log.json', count($modeA), count($disc['127.0.0.1'] ?? []));
-    same('Mode A: nothing recorded in the generation log', false, is_file($ipLog) && isset((json_decode((string) file_get_contents($ipLog), true) ?: [])['127.0.0.1']));
+    same('Mode A: every lookup counted in data/discovery_log.json', count($modeA), $hitsIn($discLog));
+    same('Mode A: nothing recorded in the generation log', 0, $hitsIn($ipLog));
 
+    // A typed sitemap is counted through Mode A ("mode": "discover") before any generation
+    @unlink($discLog);
+    [$status, $data] = $call(['url' => 'http://93.184.216.34/', 'sitemap_url' => 'http://93.184.216.35/sitemap.xml', 'mode' => 'discover']);
+    same('Mode A with sitemap_url: refused sitemap names its field',
+         [400, 'refused_url', 'sitemap_url', 'off_origin'],
+         [$status, $data['error'] ?? null, $data['field'] ?? null, $data['reason'] ?? null]);
+    same('Mode A with sitemap_url: counted in the hourly log', 1, $hitsIn($discLog));
+    same('Mode A with sitemap_url: daily slot untouched', 0, $hitsIn($ipLog));
+
+    @unlink($discLog);
     $modeB = [
         [['url' => 'http://93.184.216.34/', 'sitemap_url' => 'http://93.184.216.35/sitemap.xml'], 400, 'refused_url', 'sitemap_url', 'off_origin'],
         [['url' => 'http://93.184.216.34/', 'sitemap_url' => 'http://93.184.216.34:8080/sitemap.xml'], 400, 'refused_url', 'sitemap_url', 'bad_port'],
-        [['url' => 'http://93.184.216.34/', 'sitemap_url' => 'not a url'], 400, 'invalid_sitemap_url', null, null],
+        [['url' => 'http://93.184.216.34/', 'sitemap_url' => 'not a url'], 400, 'refused_url', 'sitemap_url', 'bad_url'],
         [['url' => 'http://10.1.1.1/', 'sitemap_url' => 'http://10.1.1.1/sitemap.xml'], 400, 'refused_url', 'url', 'private_address'],
         [['url' => 'http://[::1]/', 'sitemap_url' => 'http://[::1]/sitemap.xml'], 400, 'refused_url', 'url', 'private_address'],
     ];
@@ -929,23 +1153,28 @@ if ($server === null) {
              [$status, $error, $field, $reason],
              [$gotStatus, $data['error'] ?? null, $data['field'] ?? null, $data['reason'] ?? null]);
     }
-    $gen = is_file($ipLog) ? (json_decode((string) file_get_contents($ipLog), true) ?: []) : [];
-    same('Mode B: refused input never recorded (daily slot kept)', false, isset($gen['127.0.0.1']));
+    same('Mode B: refused input never recorded (daily slot kept)', 0, $hitsIn($ipLog));
+    same('Mode B: every validation counted in the hourly log before any lookup', count($modeB), $hitsIn($discLog));
 
-    // Discovery limit reached: Mode A answers 429 before looking at the URL
+    // Hourly limit reached: Mode A and Mode B validation both answer 429 before looking at the URL
     file_put_contents($discLog, json_encode(['127.0.0.1' => array_fill(0, DISCOVERY_LIMIT, time())]));
     [$status, $data] = $call(['url' => 'http://127.0.0.1/']);
     same('Mode A over its limit: 429 discovery_rate_limited', [429, 'discovery_rate_limited'], [$status, $data['error'] ?? null]);
     check('Mode A over its limit: next_available given', isset($data['next_available']) && strtotime($data['next_available']) > time());
     [$status, $data] = $call(['url' => 'http://10.1.1.1/', 'sitemap_url' => 'http://10.1.1.1/sitemap.xml']);
-    same('Mode B has its own limit (discovery limit does not apply)', [400, 'refused_url'], [$status, $data['error'] ?? null]);
+    same('Mode B over the hourly limit: 429 discovery_rate_limited, no validation', [429, 'discovery_rate_limited'], [$status, $data['error'] ?? null]);
+    same('Mode B over the hourly limit: daily slot untouched', 0, $hitsIn($ipLog));
 
-    // Generation already used today: Mode B answers 429 before any validation or DNS
+    // Generation already used today: Mode B answers 429 before any validation, DNS or hourly count
+    @unlink($discLog);
     file_put_contents($ipLog, json_encode(['127.0.0.1' => [time() - 60]]));
     [$status, $data] = $call(['url' => 'https://unresolvable.invalid/', 'sitemap_url' => 'https://unresolvable.invalid/sitemap.xml']);
     same('Mode B over its limit: 429 rate_limited first', [429, 'rate_limited'], [$status, $data['error'] ?? null]);
     check('Mode B over its limit: next_available about 24 h after the last run',
           isset($data['next_available']) && abs(strtotime($data['next_available']) - (time() - 60 + GENERATION_WINDOW)) <= 5);
+    same('Mode B over its limit: not counted in the hourly log', 0, $hitsIn($discLog));
+    [$status, $data] = $call(['url' => 'http://93.184.216.34/', 'sitemap_url' => 'http://93.184.216.34:8080/sitemap.xml', 'mode' => 'discover']);
+    same('Mode A with sitemap_url still works after the day\'s generation', [400, 'bad_port'], [$status, $data['reason'] ?? null]);
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

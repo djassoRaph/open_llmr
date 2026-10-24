@@ -108,5 +108,105 @@ console.log('\n1. Result JSON: strings from the crawled pages render as text');
     same('stats unit markup intact', '97.1<span class="stat-unit">%</span>', el('sRed').innerHTML);
 }
 
+// ─── 2. Requests: same-origin JSON ────────────────────────────────────────────
+
+console.log('\n2. Requests: POST JSON to the same-origin endpoint');
+
+{
+    const { page, el, requests, left } = loadPage([
+        { status: 200, body: { sitemap_url: 'https://site.example.com/sitemap.xml', pages_found: 3 } },
+        { status: 200, body: { llmr: { v: '2.1', s: { d: 'site.example.com' }, p: [] }, stats: { pages: 0 } } },
+    ]);
+    el('urlInput').value = ' https://site.example.com ';
+    await page.generate();
+    same('generate: discovery then generation', [
+        { url: 'https://site.example.com' },
+        { url: 'https://site.example.com', sitemap_url: 'https://site.example.com/sitemap.xml' },
+    ], requests.map(r => r.body));
+    same('relative endpoint URL (same origin, no CORS needed)', ['config/generate.php', 'config/generate.php'], requests.map(r => r.url));
+    same('POST with Content-Type: application/json', [['POST', 'application/json'], ['POST', 'application/json']],
+         requests.map(r => [r.method, r.headers['Content-Type']]));
+    same('generate: ends done', ['done', 0], [page.state, left()]);
+}
+
+{
+    const { page, el, requests } = loadPage([
+        { status: 200, body: { sitemap_url: 'https://site.example.com/sitemap.xml', pages_found: 0 } },
+    ]);
+    el('urlInput').value = 'https://site.example.com';
+    await page.generate();
+    same('generate, empty sitemap: no generation request', 1, requests.length);
+    same('generate, empty sitemap: asks for another sitemap', ['sitemap_not_found', 'flex'], [page.state, el('sitemapRow').style.display]);
+}
+
+// ─── 3. Typed sitemap: counted first, generation only when it has pages ───────
+
+console.log('\n3. Retry with a typed sitemap: Mode A first, so an empty one keeps the day\'s run');
+
+{
+    const { page, el, requests, left } = loadPage([
+        { status: 200, body: { sitemap_url: 'https://site.example.com/empty.xml', pages_found: 0 } },
+    ]);
+    el('urlInput').value = 'https://site.example.com';
+    el('sitemapInput').value = 'https://site.example.com/empty.xml';
+    await page.retryWithSitemap();
+    same('retry, empty sitemap: one discovery request with mode "discover"',
+         [{ url: 'https://site.example.com', sitemap_url: 'https://site.example.com/empty.xml', mode: 'discover' }],
+         requests.map(r => r.body));
+    same('retry, empty sitemap: no generation, sitemap field shown again', ['sitemap_not_found', 'flex', 0],
+         [page.state, el('sitemapRow').style.display, left()]);
+    check('retry, empty sitemap: says no pages were found', el('error').textContent.includes('No pages on this site'), el('error').textContent);
+}
+
+{
+    const { page, el, requests, left } = loadPage([
+        { status: 200, body: { sitemap_url: 'https://site.example.com/posts.xml', pages_found: 40, pages_capped: true } },
+        { status: 200, body: { llmr: { v: '2.1', s: { d: 'site.example.com' }, p: [] }, stats: { pages: 0 }, warning: 'capped_at_25' } },
+    ]);
+    el('urlInput').value = 'https://site.example.com';
+    el('sitemapInput').value = 'https://site.example.com/posts.xml';
+    await page.retryWithSitemap();
+    same('retry, sitemap with pages: counted, then generated', [
+        { url: 'https://site.example.com', sitemap_url: 'https://site.example.com/posts.xml', mode: 'discover' },
+        { url: 'https://site.example.com', sitemap_url: 'https://site.example.com/posts.xml' },
+    ], requests.map(r => r.body));
+    same('retry, sitemap with pages: ends done', ['done', 0], [page.state, left()]);
+}
+
+{
+    const { page, el, requests } = loadPage([
+        { status: 400, body: { error: 'refused_url', field: 'sitemap_url', reason: 'off_origin' } },
+    ]);
+    el('urlInput').value = 'https://site.example.com';
+    el('sitemapInput').value = 'https://other.example.net/sitemap.xml';
+    await page.retryWithSitemap();
+    same('retry, refused sitemap: no generation, field kept on screen', [1, 'sitemap_not_found', 'flex'],
+         [requests.length, page.state, el('sitemapRow').style.display]);
+}
+
+// ─── 4. Error messages ────────────────────────────────────────────────────────
+
+console.log('\n4. Error messages');
+
+const message = async (status, body) => {
+    const { page, el } = loadPage([{ status, body }]);
+    el('urlInput').value = 'https://site.example.com';
+    await page.generate();
+    return el('error').textContent;
+};
+
+{
+    const text = await message(400, { error: 'invalid_url' });
+    check('invalid_url: plain-language message, not "Server error"', text.startsWith('Enter a full web address') && !text.includes('Server error'), text);
+}
+{
+    const text = await message(400, { error: 'refused_url', field: 'url', reason: 'own_address' });
+    same('own_address explained', "That URL can't be used: it points to the server that runs this generator.", text);
+}
+{
+    const text = await message(400, { error: 'refused_url', field: 'url', reason: 'bad_url' });
+    same('bad_url explained', "That URL can't be used: it is not a valid web address.", text);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -2,12 +2,13 @@
  *
  * State machine:
  *   idle → discovering → fetching → summarizing → done
- *              └→ sitemap_not_found → (user enters URL) → fetching → …
+ *              └→ sitemap_not_found → (user enters URL) → discovering → fetching → …
  *   any → rate_limited | error
  *
  * Two requests per run: discovery (Mode A, 30 per hour) then generation (Mode B,
- * 1 per day). Generation is skipped when discovery finds no pages, so an empty
- * sitemap never uses up the day's run.
+ * 1 per day). A sitemap URL typed by the user goes through Mode A too ("mode":
+ * "discover"), and generation is skipped when discovery finds no pages, so an
+ * empty sitemap never uses up the day's run.
  */
 
 let state          = 'idle';
@@ -89,7 +90,7 @@ function setState(s, data = {}) {
 
         case 'discovering':
             genBtn.disabled = true;
-            showStatus('Looking for sitemap…');
+            showStatus(data.message || 'Looking for sitemap…');
             // Fake progress: after 3 s transition to fetching (if still discovering)
             progressTimers.push(
                 setTimeout(() => { if (state === 'discovering') setState('fetching', data); }, 3000)
@@ -211,6 +212,7 @@ const REFUSAL_REASONS = {
     credentials:     'addresses with a username or password are not allowed.',
     dns_failed:      'the domain does not resolve. Check the spelling.',
     private_address: 'it points to a private, local or reserved network address.',
+    own_address:     'it points to the server that runs this generator.',
     off_origin:      'the sitemap must be on the same site as the URL above (www. and the bare domain both count).',
 };
 
@@ -222,6 +224,10 @@ function _refusedMessage(data) {
 function _handleError(data, resp) {
     if (data.error === 'sitemap_not_found') { setState('sitemap_not_found'); return true; }
     if (data.error === 'rate_limited')       { setState('rate_limited', data); return true; }
+    if (data.error === 'invalid_url') {
+        setState('error', { message: 'Enter a full web address, such as https://yourdomain.com.' });
+        return true;
+    }
     if (data.error === 'discovery_rate_limited') {
         const next = data.next_available ? new Date(data.next_available).toLocaleTimeString() : 'an hour';
         setState('error', { message: `Too many sitemap lookups from your network this hour. Try again after ${next}.` });
@@ -258,6 +264,27 @@ function _handleError(data, resp) {
 
 // ── Entry points ──────────────────────────────────────────────────────────────
 
+// Step 2, after a successful discovery: data = { sitemap_url, pages_found, pages_capped? }
+async function _generateFrom(url, data) {
+    const sitemapUrl  = data.sitemap_url;
+    const pagesFound  = data.pages_found || 0;
+
+    // Nothing to generate from: stop here rather than spend the day's generation
+    if (!pagesFound) {
+        setState('sitemap_not_found', {
+            message: `No pages on this site were found in ${sitemapUrl}. Enter another sitemap URL:`,
+        });
+        return;
+    }
+
+    setState('fetching', { pages_found: pagesFound, pages_capped: data.pages_capped });
+
+    const { resp, data: data2 } = await _post({ url, sitemap_url: sitemapUrl });
+    if (_handleError(data2, resp)) return;
+
+    setState('done', data2);
+}
+
 async function generate() {
     const url = document.getElementById('urlInput').value.trim();
     if (!url) return;
@@ -269,25 +296,7 @@ async function generate() {
         const { resp, data } = await _post({ url });
         if (_handleError(data, resp)) return;
 
-        // Discovery succeeded — data = { sitemap_url, pages_found, pages_capped? }
-        const sitemapUrl  = data.sitemap_url;
-        const pagesFound  = data.pages_found || 0;
-
-        // Nothing to generate from: stop here rather than spend the day's generation
-        if (!pagesFound) {
-            setState('sitemap_not_found', {
-                message: `Found ${sitemapUrl}, but it lists no pages on this site. Enter another sitemap URL:`,
-            });
-            return;
-        }
-
-        setState('fetching', { pages_found: pagesFound, pages_capped: data.pages_capped });
-
-        // Step 2 — full processing
-        const { resp: resp2, data: data2 } = await _post({ url, sitemap_url: sitemapUrl });
-        if (_handleError(data2, resp2)) return;
-
-        setState('done', data2);
+        await _generateFrom(url, data);
 
     } catch (e) {
         setState('error', { message: 'Network error: ' + e.message });
@@ -299,13 +308,14 @@ async function retryWithSitemap() {
     const sitemapUrl = document.getElementById('sitemapInput').value.trim();
     if (!url || !sitemapUrl) return;
 
-    setState('fetching', {});
+    setState('discovering', { message: 'Reading sitemap…' });
 
     try {
-        const { resp, data } = await _post({ url, sitemap_url: sitemapUrl });
+        // Step 1 — count the given sitemap's pages (hourly limit, not the daily one)
+        const { resp, data } = await _post({ url, sitemap_url: sitemapUrl, mode: 'discover' });
         if (_handleError(data, resp)) return;
 
-        setState('done', data);
+        await _generateFrom(url, data);
 
     } catch (e) {
         setState('error', { message: 'Network error: ' + e.message });
