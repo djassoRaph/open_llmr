@@ -1,10 +1,10 @@
 {
   "v": "2.1",
-  "ts": 1792859708,
+  "ts": 1792913217,
   "s": {
     "d": "open-llmr.org",
     "ti": "LLMR: RSS for the AI Era",
-    "desc": "One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.",
+    "desc": "LLMR: one llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.",
     "a": {
       "n": "Raphaël Reck"
     },
@@ -22,7 +22,7 @@
       "t": "SoftwareApplication",
       "ti": "LLMR: RSS for the AI Era",
       "d": "2026-10-24",
-      "sum": "One llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT.",
+      "sum": "LLMR: one llmr.json gives any AI your full site in a single fetch. 98.3% fewer tokens, 21 pages → 1 request. Open source, MIT. Python, npm, WordPress.",
       "kw": [
         "llmr",
         "llms.txt",
@@ -34,12 +34,12 @@
         "token reduction",
         "machine readable web"
       ],
-      "wc": 130,
+      "wc": 140,
       "rt": 1,
       "tc": 1,
-      "cb": 6,
+      "cb": 8,
       "sd": 1,
-      "h1": "LLMR: One file.",
+      "h1": "LLMR: One file. Fewer tokens.",
       "a": "Raphaël Reck"
     },
     {
@@ -48,7 +48,7 @@
       "t": "AboutPage",
       "ti": "About LLMR: Built by Raphaël Reck",
       "d": "2026-10-24",
-      "sum": "LLMR was built by Raphaël Reck, an IT Systems & Software Consultant with 20+ years of experience.",
+      "sum": "LLMR was built by Raphaël Reck, an IT Systems & Software Consultant with 20+ years of experience. Read the story behind the format.",
       "kw": [
         "llmr",
         "about llmr",
@@ -85,18 +85,18 @@
         "AI indexing",
         "open source"
       ],
-      "wc": 43,
+      "wc": 48,
       "rt": 1,
       "tc": 1,
-      "cb": 7,
+      "cb": 14,
       "sd": 1,
-      "h1": "Try the",
+      "h1": "Try the generator",
       "a": "Raphaël Reck"
     }
   ],
   "stats": {
     "total_pages": 3,
-    "total_words": 258,
+    "total_words": 273,
     "avg_read_time": 1.0,
     "pages_with_code": 2
   }

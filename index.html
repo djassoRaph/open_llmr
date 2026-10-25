@@ -266,6 +266,7 @@
         <strong>Agent flow:</strong> read <code class="code-inline">llms.txt</code> to get its bearings &rarr;
         query <code class="code-inline">llmr.json</code> when the curated list is not enough &rarr;
         fetch only the pages it picked.<br>
+        Serve both: <code class="code-inline">llmr generate ./my-site --domain example.com --llms-txt</code> writes them and links them.<br>
         See ours: <a href="/llms.txt">/llms.txt</a> &middot; <a href="/llmr.json">/llmr.json</a>
     </p>
 </section>
@@ -273,7 +274,7 @@
 <!-- INSTALL -->
 <section id="install">
     <h2><span class="num" aria-hidden="true">04</span> Install</h2>
-    <p class="section-sub">Pick your platform. One command.</p>
+    <p class="section-sub">Python works today. The other platforms are on their way.</p>
 
     <div class="code-block">
         <div class="tabs">
@@ -284,13 +285,15 @@
             <button class="tab" onclick="switchTab('drupal')">Drupal</button>
         </div>
         <div class="tab-content active" id="tab-python">
-            <div class="install-cmd" onclick="copyCmd(this)">$ pip install llmr-generator && llmr generate ./my-site</div>
+            <div class="install-cmd" onclick="copyCmd(this)">$ pip install "git+https://gitlab.com/open-llmr/python.git"</div>
+            <div class="install-cmd" onclick="copyCmd(this)">$ llmr generate ./my-site --domain example.com --llms-txt</div>
+            <div class="install-cmd" onclick="copyCmd(this)">$ llmr read example.com <span class="dim"># any site: index found, tokens saved</span></div>
         </div>
         <div class="tab-content" id="tab-npm">
-            <div class="install-cmd" onclick="copyCmd(this)">$ npx @open-llmr/generator generate ./my-site</div>
+            <div class="install-cmd">Not on npm yet <span class="dim"># v2.1 source: gitlab.com/open-llmr/npm</span></div>
         </div>
         <div class="tab-content" id="tab-wordpress">
-            <div class="install-cmd" onclick="copyCmd(this)">Download from wordpress.org/plugins/open-llmr</div>
+            <div class="install-cmd">Not on wordpress.org yet <span class="dim"># v2.1 source: gitlab.com/open-llmr/wordpress</span></div>
         </div>
         <div class="tab-content" id="tab-laravel">
             <div class="install-cmd" onclick="copyCmd(this)">$ composer require open-llmr/laravel && php artisan llmr:generate <span class="dim"># coming soon</span></div>
@@ -302,14 +305,15 @@
 
     <p class="install-note">
         Then add to your HTML:<br>
-        <code class="code-inline">&lt;link rel="llmr" type="application/json" href="/llmr.json"&gt;</code>
+        <code class="code-inline">&lt;link rel="llmr" type="application/json" href="/llmr.json"&gt;</code><br>
+        Ubuntu 23.04+ or Debian 12: use <code class="code-inline">pipx install "git+https://gitlab.com/open-llmr/python.git"</code>.
     </p>
 </section>
 
 <!-- ECOSYSTEM -->
 <section>
     <h2><span class="num" aria-hidden="true">05</span> Ecosystem</h2>
-    <p class="section-sub">Each platform gets its own repo. Own CI. Own contributors.</p>
+    <p class="section-sub">Each platform gets its own repo on GitLab.</p>
 
     <table class="compare-table" aria-label="LLMR ecosystem packages">
         <caption class="visually-hidden">LLMR ecosystem: available packages by platform and status</caption>
@@ -321,10 +325,10 @@
             </tr>
         </thead>
         <tbody>
-            <tr><td><a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md">spec</a></td><td>JSON Schema + fixtures</td><td class="win">Live</td></tr>
-            <tr><td><a href="https://gitlab.com/open-llmr/python">python</a></td><td>pip install</td><td class="win">Live</td></tr>
-            <tr><td><a href="https://gitlab.com/open-llmr/npm">npm</a></td><td>TypeScript / Node 20+</td><td class="win">Live</td></tr>
-            <tr><td><a href="https://gitlab.com/open-llmr/wordpress">wordpress</a></td><td>WP 7.0 + Abilities API</td><td class="win">Live</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/spec/-/blob/main/SPEC.md">spec</a></td><td>JSON Schema + fixtures</td><td class="win">Live &middot; v2.1</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/python">python</a></td><td>pip install from GitLab &middot; generate + read</td><td class="win">Live &middot; 2.3</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/npm">npm</a></td><td>TypeScript / Node 20+</td><td class="lose">v2.1 on GitLab, not on npm yet</td></tr>
+            <tr><td><a href="https://gitlab.com/open-llmr/wordpress">wordpress</a></td><td>WP 6.7+ / 7.0 Abilities API</td><td class="lose">v2.1 on GitLab, not on wordpress.org yet</td></tr>
             <tr><td>laravel</td><td>Laravel 12+ / Composer</td><td class="lose">Planned</td></tr>
             <tr><td>drupal</td><td>Drupal 11+ / Drush</td><td class="lose">Planned</td></tr>
         </tbody>
